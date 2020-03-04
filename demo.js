@@ -6,17 +6,20 @@ let parentOf = new Relation()
 // { id: PersonID, name: String}
 let person = new Relation()
 
+person.assert({ id: 1, name: "Marco" })
+
 // Returns an iterator of ids that match
 datalog.findOnce((p) => {
     person({ id: p, name: "Marco" })
 })
 // => [[1]]
 
-datalog.findOnce((p, m) => {
+datalog.findOnce((parentName, p, m, x) => {
     person({ id: m, name: "Marco" })
     parentOf({ parent: p, child: m })
+    person({ id: p, name: parentName })
 })
-// => [[3, 1], [4, 1]]
+// => [["Simona", 3, 1, ?], ["Enrique", 4, 1, ?]]
 
 datalog.findOnce((p) => {
     const m = free()
@@ -199,7 +202,7 @@ datalog.rule((fromNode, toNode) => {
 // Updates nodes to react to edges/nodes
 
 
-// Chat example
+// Twitter example
 
 // { msgID: MessageID, content: String }
 let messages = new Relation()
@@ -207,7 +210,7 @@ let messages = new Relation()
 // { msgID: MessageID, author: PersonID }
 let msgAuthor = new Relation()
 
-// { author: PersonID, likes: MessageID }
+// { person: PersonID, likes: MessageID }
 let msgLikes = new Relation()
 
 // { id: PersonID, name: String}
@@ -218,29 +221,27 @@ let chat = datalog.find((msgID, content, author, authorName) => {
     msgAuthor({ msgID, author })
     person({ id: author, name: authorName })
 })
-    .orderBy(([msgID]) => [msgID])
-    .mapDiff((diff) => {
-        switch (diff) {
-            case "insert":
-                const insertsWithLikeCounts = diffs[2].map((info) => {
-                    const msgID = info[0]
-                    const likesStream = datalog.find((author) => { msgLikes({ msgID, author }) })
-                    return [...info, likesStream]
-                })
+    .orderBy((msgID) => [msgID])
+    .map((msgID) => {
+        const likes = datalog.find((person) => { msgLikes({ msgID, person }) })
 
-                return [diff[0], diff[1], insertsWithLikeCounts]
-        }
-        return diff
-    })
-
-let chat = datalog.find((msgID, content, author, authorName) => {
-    messages({ msgID, content })
-    msgAuthor({ msgID, author })
-    person({ id: author, name: authorName })
-})
-    .orderBy(([msgID]) => [msgID])
-    .map((info) => {
-        const msgID = info[0]
-        const likesStream = datalog.find((author) => { msgLikes({ msgID, author }) })
+        // caReduce is a special case of reduce that has commutative & associative properties
+        const likeCount = likes.caReduce((count, [diffType, person]) => diffType === "insert" ? count + 1 : count - 1, 0)
         return [...info, likesStream]
     })
+
+
+// Now render the messages to the dom
+
+render(
+    rootElement,
+    chat.map((msgID, content, _author, authorName, likes, likeCount) => {
+        return (
+            <div data-msg-id={msgID}>
+                <p>{content}</p>
+                <p>posted by: {authorName}</p>
+                {likeCount.map(count => <p>{count === 1 ? "One person likes this" : `${count} people like this`}</p>)}
+            </div>
+        )
+    })
+)
