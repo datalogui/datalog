@@ -33,8 +33,9 @@ class ExtendWith<P, KName, K, Val> implements Leaper<P, Tupleized<Val>> {
 
     count(prefix: P): number {
         const key = this.keyFunc(prefix)
-        this.startIdx = DataFrog.gallop(this.relation.elements, (row: any) => DataFrog.sortTuple(row[0], key) === -1)
-        this.endIdx = DataFrog.gallop(this.relation.elements, (row: any) => DataFrog.sortTuple(row[0], key) !== 0, this.startIdx + 1)
+        this.startIdx = DataFrog.gallop(this.relation.elements, (row: any) => DataFrog.sortTuple(row[0], key) === -1
+        )
+        this.endIdx = DataFrog.gallop(this.relation.elements, (row: any) => DataFrog.sortTuple(row[0], key) === 0, this.startIdx + 1)
         return this.endIdx - this.startIdx
     }
 
@@ -54,6 +55,43 @@ class ExtendWith<P, KName, K, Val> implements Leaper<P, Tupleized<Val>> {
 
             return DataFrog.sortTuple(this.relation.elements[startIdx]?.slice(1), val) === 0
         })
+    }
+}
+
+type LeapJoinLogicFn<KVal, SourceVal, Extension> = (sourceRow: [KVal, ...Array<ValueOf<SourceVal>>], extension: Extension) => void
+export function leapJoinHelper<KName, KVal, SourceVal, Extension>(source: RelationIndex<KName, KVal, SourceVal>, leapers: Array<Leaper<[KVal, ...Array<ValueOf<SourceVal>>], Extension>>, logic: LeapJoinLogicFn<KVal, SourceVal, Extension>) {
+    for (const row of source.elements) {
+        // 1. Determine which leaper would propose the fewest values.
+        let minIndex = Infinity;
+        let minCount = Infinity;
+
+        for (let index = 0; index < leapers.length; index++) {
+            const leaper = leapers[index];
+            const count = leaper.count(row)
+            if (count < minCount) {
+                minCount = count
+                minIndex = index
+            }
+        }
+
+        // 2. Have the least-proposing leaper propose their values.
+        if (minCount > 0) {
+            let vals = leapers[minIndex].propose(row)
+            // 3. Have the other leapers restrict the proposals.
+
+            for (let index = 0; index < leapers.length; index++) {
+                if (index !== minIndex) {
+                    const leaper = leapers[index];
+                    vals = leaper.intersect(row, vals)
+                }
+            }
+
+            // 4. Call `logic` on each value, push into `result`.
+            for (const val of vals) {
+                logic(row, val)
+            }
+        }
+
     }
 }
 

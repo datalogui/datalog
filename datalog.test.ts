@@ -43,8 +43,57 @@ describe('Relation', () => {
 
         const personExtendedWith = person.extendWith(([id]: [PersonID]) => id);
         expect(personExtendedWith.count([0])).toEqual(1)
-        expect(personExtendedWith.propose([0])).toEqual([["marco"]])
-        expect(personExtendedWith.intersect([0], [["marcopolo"], ["marco"]])).toEqual([["marco"]])
+        // expect(personExtendedWith.propose([0])).toEqual([["marco"]])
+        // expect(personExtendedWith.intersect([0], [["marcopolo"], ["marco"]])).toEqual([["marco"]])
+    });
+
+    test('ExtendWith & Leaper works', () => {
+        // { id: PersonID, name: String}
+        const person = newPerson()
+        person.assert({ id: 0, name: "marco" })
+        person.assert({ id: 0, name: "foo" })
+
+        const personExtendedWith = person.extendWith(([id]: [PersonID]) => id);
+        expect(personExtendedWith.count([0])).toEqual(2)
+    });
+
+    test('LeapJoin', () => {
+        // { id: PersonID, name: String}
+        const A = new datalog.RelationIndex<"a", number, { b: number }>([], ["a", "b"])
+        const B = new datalog.RelationIndex<"b", number, { c: number }>([], ["b", "c"])
+        const C = new datalog.RelationIndex<"a", number, { c: number }>([], ["a", "c"])
+
+        A.assert({ a: 1, b: 2 })
+        B.assert({ b: 2, c: 3 })
+        C.assert({ a: 1, c: 3 })
+
+        const out: Array<[number, number, number]> = []
+        datalog.leapJoinHelper(A, [B.extendWith(([_, b]) => b)], ([a, b], [c]) => {
+            out.push([a, b, c])
+
+        })
+        expect(out).toEqual([[1, 2, 3]])
+    });
+
+    test('LeapJoin2', () => {
+        // { id: PersonID, name: String}
+        const A = new datalog.RelationIndex<"a", number, { b: number }>([], ["a", "b"])
+        const B = new datalog.RelationIndex<"b", number, { c: number }>([], ["b", "c"])
+        const C = new datalog.RelationIndex<"a", number, { c: number }>([], ["a", "c"])
+
+        A.assert({ a: 1, b: 2 })
+        B.assert({ b: 2, c: 3 })
+        B.assert({ b: 2, c: 4 })
+        C.assert({ a: 1, c: 3 })
+        C.assert({ a: 1, c: 4 })
+
+        const out: Array<[number, number, number]> = []
+        datalog.leapJoinHelper(A, [B.extendWith(([_, b]) => b)], ([a, b], [c]) => {
+            out.push([a, b, c])
+
+        })
+
+        expect(out).toEqual([[1, 2, 3], [1, 2, 4]])
     });
 
     // test('Propose returns the item added', () => {
