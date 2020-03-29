@@ -16,6 +16,7 @@
   },
   "scripts": {
     "build": "yarn webpack --config webpack.config.js --mode=production",
-    "watch": "yarn webpack --config webpack.config.js --mode=development --watch"
+    "watch": "yarn webpack --config webpack.config.js --mode=development --watch",
+    "test": "yarn jest"
   }
 }

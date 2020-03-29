@@ -1,7 +1,7 @@
 import traverse from '@babel/traverse'
 import * as parser from '@babel/parser'
 
-function planQuery(source) {
+function planQuery(source: any) {
     const requires = new Set();
 
     let ast;
