@@ -729,7 +729,7 @@ export function* innerVariableJoinHelperGen(variables: Array<any>): Generator<an
         })
         for (let [sourceRow, extension] of leapJoinHelperGen(indexedRelations[0] as any, indexedRelations.slice(1) as any)) {
             const out: any = {}
-            srckeyOrder.reduce((acc, k, i) => {
+            srckeyOrder.reduce((acc: any, k: any, i: any) => {
                 acc[k] = sourceRow[i]
                 return acc
             }, out)
@@ -744,4 +744,34 @@ export function* innerVariableJoinHelperGen(variables: Array<any>): Generator<an
         currentIteration++
     }
 
+}
+
+function isIdentityKeyMap(keyMap: { [key: string]: string }): boolean {
+    Object.entries(keyMap).every(([k, v]) => k === v)
+}
+
+// Transform those into two lists [[[A, {a: 'a', b: 'b'}]], [[B, {c: 'c'}]]]
+type ThingToJoin<R = any, KeyMap = { [key: string]: string }> = [R, KeyMap]
+type Part = Array<ThingToJoin>
+type Parts = Array<Part>
+export function* recursiveForLoopJoin<Out = any>(parts: Parts, joinResultSoFar: any, remapKeysFn: (rel: any, keyMap: { [key: string]: string }) => any, joiner: (...relations: Array<any>) => Generator<any>): Generator<Out> {
+    const [head, ...tail] = parts
+    if (head !== undefined) {
+        // TODO figure out if we need to remapKeys
+        for (let out of joiner(...head.map(([r, keyMap]) => {
+            if (isIdentityKeyMap(keyMap)) {
+                return r
+            }
+            return remapKeysFn(r, keyMap)
+        }))) {
+            let nextJoinResultSoFar = { ...out, ...joinResultSoFar }
+            if (tail.length > 0) {
+                yield* recursiveForLoopJoin(tail, nextJoinResultSoFar, remapKeysFn, joiner)
+            } else {
+                yield nextJoinResultSoFar
+            }
+        }
+    } else {
+        throw new Error("recursiveForLoopJoin Errored. Shouldn't happen!")
+    }
 }

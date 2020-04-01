@@ -364,6 +364,92 @@ describe("Variables", () => {
     })
 })
 
+describe("recursiveForLoopJoin", () => {
+    const A = [{ a: 1, b: 2 }]
+    const B = [{ b: 2, c: 3 }]
+    const C = [{ a: 1, c: 3 }]
+
+    // resultSoFar is an array of datums i.e.: [{a: 1, b: 2}, {b: 2, c: 3}]
+    const mockJoinerHelper = function* (rels: Array<any>, resultSoFar: any): Generator<any> {
+        if (rels.length === 0) {
+            const allKeys = new Set(resultSoFar.map((datum: any) => Object.keys(datum)).flat())
+            const keysPerDatum = resultSoFar.map((datum: any) => new Set(Object.keys(datum)))
+            const commonKeys = [...allKeys].filter(k => keysPerDatum.every((s: any) => s.has(k)))
+            const areCommonKeysTheSame = commonKeys.every((k: any) => {
+                const s = new Set(resultSoFar.map((datum: any) => datum[k]))
+                return s.size === 1
+            })
+            if (areCommonKeysTheSame) {
+                yield resultSoFar.reduce((acc: any, o: any) => ({ ...acc, ...o }), {})
+            }
+        } else {
+            const [head, ...tail] = rels
+            for (let item of head) {
+                yield* mockJoinerHelper(tail, resultSoFar.concat([item]))
+            }
+        }
+    }
+
+
+    const mockJoiner = function* (...rels: Array<any>) {
+        yield* mockJoinerHelper(rels, [])
+    }
+
+
+    const mockRemapKeys = <T extends { [key: string]: any }>(rel: Array<T>, keyMap: { [key: string]: string }): Array<Partial<T> & { [key: string]: any }> => {
+        return rel.map(datum => Object.keys(datum).reduce((acc, k) => {
+            const newK = keyMap[k]
+            if (newK) {
+                acc[newK] = datum[k]
+            }
+
+            return acc
+        }, {} as any))
+
+    }
+
+
+    test("Mock joiner works", () => {
+        expect([...mockJoiner(A, B)]).toEqual([{ a: 1, b: 2, c: 3 }])
+        expect([...mockJoiner(A, B, C)]).toEqual([{ a: 1, b: 2, c: 3 }]);
+        {
+            const C = [{ a: 1, c: 3 }, { a: 1, c: 4 }]
+            expect([...mockJoiner(A, B, C)]).toEqual([{ a: 1, b: 2, c: 3 }, { a: 1, b: 2, c: 4 }])
+        }
+    })
+
+    test("Mock remap keys works", () => {
+        expect(mockRemapKeys(A, { a: 'a2', b: 'b' })).toEqual([{ a2: 1, b: 2 }])
+    })
+
+    test("joins 1 part", () => {
+        const parts: Array<Array<[any, { [key: string]: string }]>> = [
+            [[A, { a: 'a', b: 'b' }], [B, { b: 'b', c: 'c' }]]
+        ]
+        const it = datalog.recursiveForLoopJoin(parts, {}, mockRemapKeys, mockJoiner)
+        expect([...it]).toEqual([{ a: 1, b: 2, c: 3 }])
+    })
+
+    test("joins 2 part", () => {
+        const parts: Array<Array<[any, { [key: string]: string }]>> = [
+            [[A, { a: 'a', b: 'b' }]], [[B, { b: 'b2', c: 'c' }]]
+        ]
+
+        const it = datalog.recursiveForLoopJoin(parts, {}, mockRemapKeys, mockJoiner)
+        expect([...it]).toEqual([{ a: 1, b: 2, b2: 2, c: 3 }])
+    })
+
+    test("Joins twice, then one more time", () => {
+        const parts: Array<Array<[any, { [key: string]: string }]>> = [
+            [[A, { a: 'a', b: 'b' }], [B, { b: 'b', c: 'c' }]],
+            [[B, { b: 'b2', c: 'c2' }]]
+        ]
+
+        const it = datalog.recursiveForLoopJoin(parts, {}, mockRemapKeys, mockJoiner)
+        expect([...it]).toEqual([{ a: 1, b: 2, b2: 2, c: 3, c2: 3 }])
+    })
+})
+
 // I need to convert the pretty syntax into the above
 
 // Something like:
@@ -396,9 +482,60 @@ describe("Variables", () => {
 //   }
 // }
 
+// first make a list of fn calls. i.e. [A, B], along with a list of their parameters: [{a: 'a', b: 'b'}, {c: 'c'}]
+// Transform those into two lists [[[A, {a: 'a', b: 'b'}]], [[B, {c: 'c'}]]]
+
+// then that gets transformed into:
+// function* () {
+//   for (let {a, b} of datalog.variableJoinHelperGen(A)) {
+//     for (let {c} of datalog.variableJoinHelperGen(B)) {
+//       yield {a, b, c}
+//     }
+//   }
+// }
+
+// in the case of the triangle join on A B C
+// query(({a, b, c}) => {
+//  A({a, b})
+//  B({b, c})
+//  C({c, a})
+// })
+// Transform those into two lists: [[[A, {a: 'a', b: 'b}], [B, {b: 'b', c: 'c'}], [C: {c: 'c', a: 'a'}]]]
+// that gets transformed into:
+// function* () {
+//   for (let {a, b, c} of datalog.variableJoinHelperGen(A, B, C)) {
+//     yield {a, b, c}
+//   }
+// }
+
+// in the case of the rename:
+// query(({a1, a2}: {a1: number, a2: number}) => {
+//  A({a: a1})
+//  A({a: a2})
+// })
+// Transform those into two lists: [[[A, {a: 'a1'}]], [[A, {a: 'a2'}]]]
+// that gets transformed into:
+// function* () {
+//   for (let {a: a1} of datalog.variableJoinHelperGen(A)) {
+//     for (let {a: a2} of datalog.variableJoinHelperGen(A)) {
+//       yield {a1, a2}
+//     }
+//   }
+// }
 
 
-
+// in the case:
+// query(({a, b1, b2}) => {
+//  A({a: a, b: b1})
+//  A2({a: a, b: b2})
+// })
+// Transform those into two lists: [[[A, {a: 'a1'}]], [[A, {a: 'a2'}]]]
+// that gets transformed into:
+// function* () {
+//   for (let {a, b1, b2} of datalog.variableJoinHelperGen(remapKeys(A, {b: 'b1'}), remapKeys(A2, {b: 'b2'}))) {
+//     yield {a1, a2}
+//   }
+// }
 
 
 
