@@ -298,9 +298,9 @@ describe("Variables", () => {
         C.assert({ a: 1, c: 3, d: 7 })
 
         let out: Array<{ a: number, b: number, c: number, d: number }> = []
-        datalog.variableJoinHelper((datum) => {
-            out.push(datum)
-        }, A, B, C)
+        for (let join of datalog.variableJoinHelperGen(A, B, C)) {
+            out.push(join)
+        }
 
         expect(out).toEqual([
             { a: 1, b: 2, c: 3, d: 5 },

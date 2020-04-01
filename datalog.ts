@@ -255,7 +255,13 @@ export function filterKeys(keysToKeep: Array<string>, keyOrder: Array<string>) {
 }
 
 type LeapJoinLogicFn<KVal, SourceVal, Extension> = (sourceRow: [KVal, ...Array<ValueOf<SourceVal>>], extension: Extension) => void
+
 export function leapJoinHelper<KName extends string | number | symbol, KVal, SourceVal, Extension>(source: RelationIndex<KName, KVal, SourceVal>, leapers: Array<Leaper<[KVal, ...Array<ValueOf<SourceVal>>], Extension>>, logic: LeapJoinLogicFn<KVal, SourceVal, Extension>) {
+    for (let rowAndExtension of leapJoinHelperGen(source, leapers)) {
+        logic(...rowAndExtension)
+    }
+}
+export function* leapJoinHelperGen<KName extends string | number | symbol, KVal, SourceVal, Extension>(source: RelationIndex<KName, KVal, SourceVal>, leapers: Array<Leaper<[KVal, ...Array<ValueOf<SourceVal>>], Extension>>): Generator<[[KVal, ...Array<ValueOf<SourceVal>>], Extension], void, undefined> {
     for (const row of source.elements) {
         // 1. Determine which leaper would propose the fewest values.
         let minIndex = Infinity;
@@ -285,9 +291,9 @@ export function leapJoinHelper<KName extends string | number | symbol, KVal, Sou
                 }
             }
 
-            // 4. Call `logic` on each value, push into `result`.
+            // 4. Yield the val
             for (const val of vals) {
-                logic(row, val)
+                yield [row, val]
             }
         }
 
@@ -651,16 +657,16 @@ export class Variable<T> implements Tell<T> {
 //     <V1, V2, V3>(logicFn: (joined: V1 & V2 & V3) => void, ...variables: [Variable<V1>, Variable<V2>, Variable<V3>]): void
 // }
 
-export function variableJoinHelper<V1, V2>(logicFn: (joined: V1 & V2) => void, ...variables: [Variable<V1>, Variable<V2>]): void;
-export function variableJoinHelper<V1, V2, V3>(logicFn: (joined: V1 & V2 & V3) => void, ...variables: [Variable<V1>, Variable<V2>, Variable<V3>]): void
-export function variableJoinHelper<V1, V2, V3, V4>(logicFn: (joined: V1 & V2 & V3 & V4) => void, ...variables: [Variable<V1>, Variable<V2>, Variable<V3>, Variable<V4>]): void
+export function variableJoinHelperGen<V1, V2>(...variables: [Variable<V1>, Variable<V2>]): Generator<V1 & V2>;
+export function variableJoinHelperGen<V1, V2, V3>(...variables: [Variable<V1>, Variable<V2>, Variable<V3>]): Generator<V1 & V2 & V3>;
+export function variableJoinHelperGen<V1, V2, V3, V4>(...variables: [Variable<V1>, Variable<V2>, Variable<V3>, Variable<V4>]): Generator<V1 & V2 & V3 & V4>;
 
-export function variableJoinHelper(logicFn: (source: any) => void, ...variables: Array<any>) {
+export function* variableJoinHelperGen(...variables: Array<any>): Generator<any> {
     while (variables.some(v => v.changed())) {
-        innerVariableJoinHelper(logicFn, variables)
+        yield* innerVariableJoinHelperGen(variables)
     }
 }
-export function innerVariableJoinHelper(logicFn: (source: any) => void, variables: Array<any>) {
+export function* innerVariableJoinHelperGen(variables: Array<any>): Generator<any> {
     // We have to compare:
     // All the recents
     // every stable against every other recent
@@ -715,18 +721,19 @@ export function innerVariableJoinHelper(logicFn: (source: any) => void, variable
             // @ts-ignore
             return relation.indexBy(srckeyOrder)
         })
-        leapJoinHelper(indexedRelations[0] as any, indexedRelations.slice(1) as any, (sourceRow, extension: any) => {
+        for (let [sourceRow, extension] of leapJoinHelperGen(indexedRelations[0] as any, indexedRelations.slice(1) as any)) {
             const out: any = {}
             srckeyOrder.reduce((acc, k, i) => {
                 acc[k] = sourceRow[i]
                 return acc
             }, out)
             outputKeyOrder.reduce((acc, k, i) => {
+                // @ts-ignore
                 acc[k] = extension[i]
                 return acc
-            }, out)
-            logicFn(out)
-        })
+            }, out);
+            yield out
+        }
 
         currentIteration++
     }
