@@ -1,4 +1,6 @@
 import * as datalog from './datalog'
+// @ts-ignore
+import * as DataFrog from 'datafrog-js'
 
 type PersonID = number
 
@@ -135,7 +137,7 @@ describe('Relation', () => {
             ),
             new datalog.ExtendWithAndCarry(
                 ([a, _]) => a,
-                ([out, d]) => [[out], { d }], // nothing to carry
+                ([out, d]) => [[out], { d }],
                 C
             )
 
@@ -157,15 +159,109 @@ describe('Relation', () => {
 
         expect(objects).toEqual([{ a: 1, b: 2, c: 3, d: 0 }])
     });
+
+    test('Using the Unconstrained symbol in joins to specify columns that are not constrained', () => {
+        const A = new datalog.RelationIndex<"a", number, { b: number }>([], ["a", "b"])
+        const B = new datalog.RelationIndex<"b", number, { c: number }>([], ["b", "c"])
+        const C = new datalog.RelationIndex<"a", number, { c: number, d: number }>([], ["a", "c", "d"])
+
+        A.assert({ a: 1, b: 2 })
+        B.assert({ b: 2, c: 3 })
+        B.assert({ b: 2, c: 4 })
+        C.assert({ a: 1, c: 3, d: 0 })
+        C.assert({ a: 1, c: 3, d: 2 })
+        C.assert({ a: 1, c: 3, d: 4 })
+
+        // const BLeaper = new datalog.ExtendWithUnconstrained(
+        //     ([_a, b]: [number, number]) => b,
+        //     ["c", "d"],
+        //     B
+        // )
+        // expect(BLeaper.outputTupleFunc([3])).toEqual([3, datalog.Unconstrained])
+
+        const out: Array<[number, number, ...(number | symbol)[]]> = []
+
+        datalog.leapJoinHelper(A, [
+            new datalog.ExtendWithUnconstrained(
+                ([_a, b]) => b,
+                ["c", "d"],
+                B
+            ),
+            new datalog.ExtendWithUnconstrained(
+                ([a, _b]) => a,
+                ["c", "d"],
+                C
+            ),
+        ], ([a, b], rest) => {
+            out.push([a, b, ...rest])
+        })
+        expect(out).toEqual([[1, 2, 3, 0], [1, 2, 3, 2], [1, 2, 3, 4]])
+
+        expect(DataFrog.sortTuple([datalog.Unconstrained, 1], [2, 1])).toEqual(0)
+    })
+
+    test('Filter ou missing keys', () => {
+        // Say relation B has keys ['c', 'b']
+        // and our output tuple key order is ['a', 'b', 'c', 'd']
+        // We should index B by ['b', 'c']
+
+        expect(
+            datalog.filterKeys(['b', 'c'], ['a', 'b', 'c', 'd'])
+        ).toEqual(['b', 'c'])
+
+
+
+    })
+
+    test('Order leaper keys', () => {
+        let restKeys = [
+            ['c', 'e'],
+            ['c', 'd'],
+            ['c', 'd', 'e'],
+        ]
+
+        let minIdx = 0
+        restKeys.forEach((ks, i) => {
+            if (ks.length < restKeys[minIdx].length) {
+                minIdx = i
+            }
+        })
+
+        let setWithLeastKeys = new Set(restKeys[minIdx])
+        restKeys = restKeys.filter((_, i) => i !== minIdx)
+
+        let currentIdx = 0
+
+        // Split between common keys and rest of the keys
+        const restKeysSplit: Array<[Array<string>, Array<string>]> = restKeys.map(() => [[], []])
+
+        restKeys.forEach((ks, j) => {
+            ks.forEach(rest_k => {
+                if (setWithLeastKeys.has(rest_k)) {
+                    restKeysSplit[j][0].push(rest_k)
+                } else {
+                    restKeysSplit[j][1].push(rest_k)
+                }
+            })
+        })
+
+        restKeys = restKeysSplit.map(([common, rest]) => common.concat(rest))
+        // while (currentIdx < setWithLeastKeys.length) {
+        //     const k = setWithLeastKeys[currentIdx]
+        //     restKeys.forEach(ks => {
+        //         ks
+        //     })
+        // }
+    })
 })
 
 describe("MultiIndexRelations", () => {
     test("MultiIndex can indexBy", () => {
         const A = new datalog.Relation<{ a: number, b: number }>()
         A.assert({ a: 1, b: 2 })
-        A.indexBy('a')
+        A.indexBy(['a', 'b'])
         expect(A.relations[0].elements).toEqual([[1, 2]])
-        A.indexBy('b')
+        A.indexBy(['b', 'a'])
         expect(A.relations[0].elements).toEqual([[1, 2]])
         expect(A.relations[1].elements).toEqual([[2, 1]])
     })
@@ -194,20 +290,22 @@ describe("Variables", () => {
     test("Joining Variables", () => {
         const A = new datalog.Variable<{ a: number, b: number }>()
         const B = new datalog.Variable<{ b: number, c: number }>()
-        const C = new datalog.Variable<{ c: number, a: number }>()
+        const C = new datalog.Variable<{ c: number, a: number, d: number }>()
         A.assert({ a: 1, b: 2 })
         B.assert({ b: 2, c: 3 })
         B.assert({ b: 2, c: 4 })
-        C.assert({ a: 1, c: 3 })
-        while (A.changed()) { }
-        while (B.changed()) { }
-        while (C.changed()) { }
-        expect(A.changed()).toEqual(false)
+        C.assert({ a: 1, c: 3, d: 5 })
+        C.assert({ a: 1, c: 3, d: 7 })
 
-        datalog.variableJoinHelper('a', (datum) => {
-            console.log('!!!!!!!!!!', datum)
+        let out: Array<{ a: number, b: number, c: number, d: number }> = []
+        datalog.variableJoinHelper((datum) => {
+            out.push(datum)
         }, A, B, C)
 
+        expect(out).toEqual([
+            { a: 1, b: 2, c: 3, d: 5 },
+            { a: 1, b: 2, c: 3, d: 7 }
+        ])
     })
 })
 

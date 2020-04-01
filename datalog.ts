@@ -4,6 +4,7 @@ import * as DataFrog from 'datafrog-js'
 type ValueOf<T> = T[keyof T];
 
 type Tupleized<T> = Array<ValueOf<T>>
+type TupleizedUnconstrained<T> = Array<ValueOf<T> | typeof Unconstrained>
 
 // type Tupleized<K, Val> = [K, ...Array<ValueOf<Val>>]
 
@@ -60,6 +61,100 @@ class ExtendWith<P, KName extends string | number | symbol, K, Val> implements L
     }
 }
 
+export const Unconstrained = DataFrog.Unconstrained as symbol
+
+type OutputKeys = Array<string | number | symbol>
+// Like extend but supports output tuples with unconstrained values that may be resolved by other leapers
+export class ExtendWithUnconstrained<P, KName extends string | number | symbol, K, Val> implements Leaper<P, TupleizedUnconstrained<Val>> {
+    keyFunc: (P: P) => K
+    outputKeys: OutputKeys
+    relation: RelationIndex<KName, K, Val>
+    outputTupleFunc: (relationVals: Tupleized<Val>) => TupleizedUnconstrained<Val>
+
+    startIdx: number = 0
+    endIdx: number = 0
+
+    constructor(keyFunc: (P: P) => K, outputKeys: OutputKeys, relation: RelationIndex<KName, K, Val>) {
+        this.keyFunc = keyFunc
+        this.outputKeys = outputKeys
+        this.relation = relation
+        const myKs = this.relation.keyOrdering.slice(1)
+        const unconstrainedIndices = []
+        const mapping = myKs.reduce((acc: { [key: number]: number }, k, i) => {
+            acc[i] = outputKeys.indexOf(k)
+            return acc
+        }, {})
+        this.outputTupleFunc = (relationVals) => {
+            const out = new Array(outputKeys.length)
+            out.fill(Unconstrained)
+            relationVals.map((val, i) => {
+                if (mapping[i] > -1) {
+                    out[mapping[i]] = val
+                }
+            })
+            return out
+        }
+    }
+
+    count(prefix: P): number {
+        const key = this.keyFunc(prefix)
+        this.startIdx = DataFrog.gallop(this.relation.elements, (row: any) => DataFrog.sortTuple(row[0], key) === -1
+        )
+        this.endIdx = DataFrog.gallop(this.relation.elements, (row: any) => DataFrog.sortTuple(row[0], key) === 0, this.startIdx + 1)
+        return this.endIdx - this.startIdx
+    }
+
+    propose(prefix: P): Array<TupleizedUnconstrained<Val>> {
+        return this.relation.elements.slice(this.startIdx, this.endIdx).map(([_, ...rest]) => this.outputTupleFunc(rest))
+    }
+
+    // Could be faster if we mutate vals
+    intersect(prefix: P, vals: Array<TupleizedUnconstrained<Val>>): Array<TupleizedUnconstrained<Val>> {
+        const key = this.keyFunc(prefix)
+        let startIdx = this.startIdx - 1;
+        const out: Array<TupleizedUnconstrained<Val>> = []
+
+        let valIndex = 0
+        while (valIndex < vals.length) {
+            const val = vals[valIndex]
+            startIdx = DataFrog.gallop(this.relation.elements, ([_, ...rest]: any) => {
+                const output = this.outputTupleFunc(rest)
+                DataFrog.sortTuple(output[0], val[0]) === -1
+            }, startIdx + 1)
+
+            if (startIdx >= this.relation.elements.length) {
+                break
+            }
+
+            // @ts-ignore
+            const output = this.outputTupleFunc(this.relation.elements[startIdx]?.slice(1))
+            const hasMatch = DataFrog.sortTuple(output, val) === 0
+
+            if (hasMatch) {
+                // Check for unconstrained
+                let filledInUnconstrained: null | TupleizedUnconstrained<Val> = null
+                val.forEach((column, i) => {
+                    if (column === Unconstrained && output[i] !== Unconstrained) {
+                        if (filledInUnconstrained == null) {
+                            filledInUnconstrained = [...val]
+                        }
+                        filledInUnconstrained[i] = output[i]
+                    }
+                })
+
+                if (filledInUnconstrained) {
+                    out.push(filledInUnconstrained)
+                    continue
+                }
+                out.push(val)
+            }
+            valIndex++
+        }
+
+        return out
+    }
+}
+
 // Like extend but supports output tuples with rest of keys
 export class ExtendWithAndCarry<P, KName extends string | number | symbol, K, Val> implements Leaper<P, [Tupleized<Val>, Partial<Val>]> {
     keyFunc: (P: P) => K
@@ -98,8 +193,6 @@ export class ExtendWithAndCarry<P, KName extends string | number | symbol, K, Va
         return vals.filter(val => {
             startIdx = DataFrog.gallop(this.relation.elements, ([_, ...rest]: any) => {
                 const output = this.outputTupleFunc(rest)
-                console.warn('me', val[0])
-                console.warn('rest', rest, output)
                 DataFrog.sortTuple(output[0], val[0]) === -1
             })
             if (startIdx >= this.relation.elements.length) {
@@ -154,6 +247,11 @@ export function joinKeyOrdering(keyOrderings: Array<Array<string>>): Array<strin
     }
 
     return out
+}
+
+export function filterKeys(keysToKeep: Array<string>, keyOrder: Array<string>) {
+    const set = new Set(keysToKeep)
+    return keyOrder.filter(k => set.has(k))
 }
 
 type LeapJoinLogicFn<KVal, SourceVal, Extension> = (sourceRow: [KVal, ...Array<ValueOf<SourceVal>>], extension: Extension) => void
@@ -329,8 +427,9 @@ interface Tell<Val> {
 
 interface MultiIndexRelation<T> {
     keys: () => Array<keyof T>
-    isIndexedBy: (k: keyof T) => number
-    indexBy: (k: keyof T) => void
+    isIndexedBy: (k: [keyof T, ...Array<keyof T>]) => number
+    indexByK: (k: keyof T) => void
+    indexBy: (ks: [keyof T, ...Array<keyof T>]) => RelationIndex<keyof T, keyof T, T>
 }
 
 
@@ -381,27 +480,39 @@ export class Relation<T> implements MultiIndexRelation<T>, Tell<T> {
         this.relations.forEach(relation => relation.assert(v))
     }
 
-    _isIndexedBy(k: keyof T) {
+    _isIndexedByK(k: keyof T) {
         return this.relations.findIndex(relation => {
             return relation.keyOrdering[0] === k
         })
     }
 
-    isIndexedBy(k: keyof T) {
-        return this._isIndexedBy(k)
+    _isIndexedBy(ks: [keyof T, ...Array<keyof T>]) {
+        return this.relations.findIndex(relation => {
+            return relation.keyOrdering.every((k, i) => k === ks[i])
+        })
+    }
+
+    isIndexedByK(k: keyof T) {
+        return this._isIndexedByK(k)
+    }
+
+    isIndexedBy(ks: [keyof T, ...Array<keyof T>]) {
+        return this._isIndexedBy(ks)
     }
 
     keys() {
         return this.relations[0].keyOrdering
     }
 
-    indexBy(k: keyof T) {
+    indexByk(k: keyof T) {
         if (this.relations.length === 0) {
             console.warn("No Data to index by")
-            return new RelationIndex<keyof T, T[keyof T], T>([], [k])
+            const relation = new RelationIndex<keyof T, T[keyof T], T>([], [k])
+            this.relations.push(relation)
+            return relation
         }
 
-        const indexedRelationIdx = this._isIndexedBy(k)
+        const indexedRelationIdx = this._isIndexedByK(k)
         if (indexedRelationIdx !== -1) {
             return this.relations[indexedRelationIdx]
         }
@@ -413,12 +524,41 @@ export class Relation<T> implements MultiIndexRelation<T>, Tell<T> {
         this.relations.push(newIndexedRelation)
         return newIndexedRelation
     }
+
+    // @ts-ignore
+    indexBy(ks: [keyof T, ...Array<keyof T>]) {
+        if (this.relations.length === 0) {
+            // console.warn("No Data to index by")
+            return new RelationIndex<keyof T, keyof T, T>([], ks)
+        }
+
+        const indexedRelationIdx = this._isIndexedBy(ks)
+        if (indexedRelationIdx !== -1) {
+            return this.relations[indexedRelationIdx]
+        }
+
+        const newIndexedRelation = this.relations[0].indexBy(ks)
+        // @ts-ignore
+        this.relations.push(newIndexedRelation)
+        return newIndexedRelation
+    }
 }
 
 export class Variable<T> implements Tell<T> {
     stable: Relation<T> = new Relation<T>()
     recent: Relation<T> = new Relation<T>()
     toAdd: Array<Relation<T>> = []
+
+    keys(): Array<string | number | symbol> {
+        if (this.stable.length) {
+            return this.stable.keys()
+        } else if (this.recent.length) {
+            return this.recent.keys()
+        } else if (this.toAdd.length && this.toAdd[0].length) {
+            return this.toAdd[0].keys()
+        }
+        throw new Error("Relation doesn't have any data. Can't infer schema")
+    }
 
 
     assert(v: T) {
@@ -455,7 +595,7 @@ export class Variable<T> implements Tell<T> {
 
                 let indexedToAddIdx = -1
                 const indexedStableIdx = this.stable.relations.findIndex((relation) => {
-                    indexedToAddIdx = toAdd.isIndexedBy(relation.keyOrdering[0])
+                    indexedToAddIdx = toAdd.isIndexedBy(relation.keyOrdering)
                     return indexedToAddIdx
                 })
 
@@ -466,15 +606,17 @@ export class Variable<T> implements Tell<T> {
                     indexedStable = this.stable.relations[indexedStableIdx]
                     indexedToAdd = toAdd.relations[indexedToAddIdx]
                 } else {
-                    indexedStable = this.stable.indexBy(this.stable.keys()[0])
-                    indexedToAdd = toAdd.indexBy(this.stable.keys()[0])
+                    indexedStable = this.stable.indexBy(this.stable.keys())
+                    indexedToAdd = toAdd.indexBy(this.stable.keys())
                 }
+
 
                 if (indexedToAdd === undefined || indexedStable === undefined) {
                     // Shouldn't happen
                     throw new Error("Shouldn't happen")
                 }
 
+                // @ts-ignore
                 indexedToAdd.elements = indexedToAdd.elements.filter(elem => {
                     let searchIdx = DataFrog.gallop(
                         indexedStable.elements,
@@ -506,7 +648,19 @@ export class Variable<T> implements Tell<T> {
 
 }
 
-export function variableJoinHelper<T, Q>(key: keyof T, logicFn: (source: T & Q) => void, ...variables: [Variable<T>, ...Array<Variable<Q>>]) {
+//     <V1, V2, V3>(logicFn: (joined: V1 & V2 & V3) => void, ...variables: [Variable<V1>, Variable<V2>, Variable<V3>]): void
+// }
+
+export function variableJoinHelper<V1, V2>(logicFn: (joined: V1 & V2) => void, ...variables: [Variable<V1>, Variable<V2>]): void;
+export function variableJoinHelper<V1, V2, V3>(logicFn: (joined: V1 & V2 & V3) => void, ...variables: [Variable<V1>, Variable<V2>, Variable<V3>]): void
+export function variableJoinHelper<V1, V2, V3, V4>(logicFn: (joined: V1 & V2 & V3 & V4) => void, ...variables: [Variable<V1>, Variable<V2>, Variable<V3>, Variable<V4>]): void
+
+export function variableJoinHelper(logicFn: (source: any) => void, ...variables: Array<any>) {
+    while (variables.some(v => v.changed())) {
+        innerVariableJoinHelper(logicFn, variables)
+    }
+}
+export function innerVariableJoinHelper(logicFn: (source: any) => void, variables: Array<any>) {
     // We have to compare:
     // All the recents
     // every stable against every other recent
@@ -525,46 +679,53 @@ export function variableJoinHelper<T, Q>(key: keyof T, logicFn: (source: T & Q) 
     //
     // That looks a lot like counting.
 
-
-
-    const srckeyOrder = variables[0].stable.keys()
+    const srckeyOrder = variables[0].keys()
+    const fullOutputKeyOrder = joinKeyOrdering(variables.map(v => v.keys()) as any)
+    const outputKeyOrder = fullOutputKeyOrder.slice(srckeyOrder.length)
     const restKeyOrders = variables.slice(1).map(variable => {
         // @ts-ignore
-        const indexByK = variable.stable.keys().find(k => srckeyOrder.includes(k))
-        return indexByK
+        const indexByKeyOrder = filterKeys(variable.keys(), fullOutputKeyOrder)
+        return indexByKeyOrder
     })
 
-    // const totalIterations = (2 ** variables.length) - 1 // minus 1 since we don't need to check the final state of all stable
-    const totalIterations = (2 ** variables.length)
+    const totalIterations = (2 ** variables.length) - 1 // minus 1 since we don't need to check the final state of all stable
+    // const totalIterations = (2 ** variables.length)
     let currentIteration = 0
+    // let currentIteration = totalIterations - 1
     while (currentIteration < totalIterations) {
         const indexedRelations = variables.map((variable, index) => {
             // check if we should return a recent or stable for this relation
             const relation = ((currentIteration >> index) & 1) ? variable.stable : variable.recent
             if (index !== 0) {
-                const indexedRelation = relation.indexBy(restKeyOrders[index - 1])
+                const indexedRelation = relation.indexBy(restKeyOrders[index - 1] as any)
                 // @ts-ignore
-                return indexedRelation.extendWith((src) => {
+                return new ExtendWithUnconstrained(
+                    (src: any) => {
+                        // @ts-ignore
+                        return src[srckeyOrder.indexOf(indexedRelation.keyOrdering[0])]
+                    },
+                    outputKeyOrder,
                     // @ts-ignore
-                    return src[srckeyOrder.indexOf(indexedRelation.keyOrdering[0])]
-                })
+                    indexedRelation)
+                // return indexedRelation.extendWith((src) => {
+                //     // @ts-ignore
+                //     return src[srckeyOrder.indexOf(indexedRelation.keyOrdering[0])]
+                // })
             }
             // @ts-ignore
-            return relation.indexBy(srckeyOrder[0])
+            return relation.indexBy(srckeyOrder)
         })
-        leapJoinHelper(indexedRelations[0] as any, indexedRelations.slice(1) as any, (sourceRow, extension) => {
-            const source = indexedRelations[0].keyOrdering.reduce((acc: any, k: any, i: number) => {
-                acc[k] = i
+        leapJoinHelper(indexedRelations[0] as any, indexedRelations.slice(1) as any, (sourceRow, extension: any) => {
+            const out: any = {}
+            srckeyOrder.reduce((acc, k, i) => {
+                acc[k] = sourceRow[i]
                 return acc
-            }, {})
-
-            // TODO something here
-            // const withExtension = indexedRelations[1].keyOrdering.slice(1).reduce((acc: any, k: any, i: number) => {
-            //     acc[k] = i
-            //     return acc
-            // }, source)
-
-            // logicFn(withExtension)
+            }, out)
+            outputKeyOrder.reduce((acc, k, i) => {
+                acc[k] = extension[i]
+                return acc
+            }, out)
+            logicFn(out)
         })
 
         currentIteration++
