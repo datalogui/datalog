@@ -262,6 +262,11 @@ export function leapJoinHelper<KName extends string | number | symbol, KVal, Sou
     }
 }
 export function* leapJoinHelperGen<KName extends string | number | symbol, KVal, SourceVal, Extension>(source: RelationIndex<KName, KVal, SourceVal>, leapers: Array<Leaper<[KVal, ...Array<ValueOf<SourceVal>>], Extension>>): Generator<[[KVal, ...Array<ValueOf<SourceVal>>], Extension], void, undefined> {
+    if (leapers.length === 0) {
+        // @ts-ignore
+        yield* source.elements.map(row => [row, []])
+        return
+    }
     for (const row of source.elements) {
         // 1. Determine which leaper would propose the fewest values.
         let minIndex = Infinity;
@@ -657,6 +662,7 @@ export class Variable<T> implements Tell<T> {
 //     <V1, V2, V3>(logicFn: (joined: V1 & V2 & V3) => void, ...variables: [Variable<V1>, Variable<V2>, Variable<V3>]): void
 // }
 
+export function variableJoinHelperGen<V1>(...variables: [Variable<V1>]): Generator<V1>;
 export function variableJoinHelperGen<V1, V2>(...variables: [Variable<V1>, Variable<V2>]): Generator<V1 & V2>;
 export function variableJoinHelperGen<V1, V2, V3>(...variables: [Variable<V1>, Variable<V2>, Variable<V3>]): Generator<V1 & V2 & V3>;
 export function variableJoinHelperGen<V1, V2, V3, V4>(...variables: [Variable<V1>, Variable<V2>, Variable<V3>, Variable<V4>]): Generator<V1 & V2 & V3 & V4>;

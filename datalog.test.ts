@@ -16,6 +16,26 @@ type PersonID = number
 //     });
 // })
 
+describe.skip("Playground", () => {
+    test("Generators", () => {
+        console.log('here')
+        function count(n: number, cb: (i: number) => void) {
+            for (let i = 0; i < n; i++) {
+                cb(i)
+            }
+        }
+
+        function countGen(n: number): Iterable<number> {
+            const out: any = [];
+            count(n, i => out.push(i))
+            return out[Symbol.iterator]()
+        }
+
+        console.log(count(10, (n) => console.log(n)))
+        console.log([...countGen(10)])
+    })
+})
+
 describe('Relation', () => {
     // test('Returns a function', () => {
     // { id: PersonID, name: String}
@@ -307,10 +327,74 @@ describe("Variables", () => {
             { a: 1, b: 2, c: 3, d: 7 }
         ])
     })
+
+    test("Joining Empty Variables", () => {
+        const A = new datalog.Variable<{ a: number, b: number }>()
+        const B = new datalog.Variable<{ b: number, c: number }>()
+        const C = new datalog.Variable<{ c: number, a: number, d: number }>()
+
+        let out: Array<{ a: number, b: number, c: number, d: number }> = [...datalog.variableJoinHelperGen(A, B, C)]
+
+        expect(out).toEqual([])
+    })
+
+    test("Joining 1 Variable", () => {
+        const A = new datalog.Variable<{ a: number, b: number }>()
+
+        let out: Array<{ a: number, b: number }> = [...datalog.variableJoinHelperGen(A)]
+        expect(out).toEqual([])
+
+        A.assert({ a: 1, b: 2 })
+        out = [...datalog.variableJoinHelperGen(A)]
+        expect(out).toEqual([{ a: 1, b: 2 }])
+    })
+
+    test("Joining 2 Variables", () => {
+        const A = new datalog.Variable<{ a: number, b: number }>()
+        const B = new datalog.Variable<{ b: number, c: number }>()
+
+        let out: Array<{ a: number, b: number, c: number }> = [...datalog.variableJoinHelperGen(A, B)]
+        expect(out).toEqual([])
+
+        A.assert({ a: 1, b: 2 })
+        A.assert({ a: 1, b: 4 })
+        B.assert({ b: 2, c: 3 })
+        out = [...datalog.variableJoinHelperGen(A, B)]
+        expect(out).toEqual([{ a: 1, b: 2, c: 3 }])
+    })
 })
 
+// I need to convert the pretty syntax into the above
 
+// Something like:
 
+// query(({a, b, c}: {a: number, b: number, c: number}) => {
+//  A({a, b})
+//  B({b, c})
+// })
+
+// Becomes
+
+// function* () {
+//   for (let {a, b, C} of datalog.variableJoinHelperGen(A, B)) {
+//     yield {a, b, c}
+//   }
+// }
+
+// query(({a, b, c}: {a: number, b: number, c: number}) => {
+//  A({a, b})
+//  B({c})
+// })
+
+// Becomes
+
+// function* () {
+//   for (let {a, b} of datalog.variableJoinHelperGen(A)) {
+//     for (let {c} of datalog.variableJoinHelperGen(B)) {
+//       yield {a, b, c}
+//     }
+//   }
+// }
 
 
 
