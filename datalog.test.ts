@@ -233,7 +233,7 @@ describe('Relation', () => {
         expect(DataFrog.sortTuple([datalog.Unconstrained, 1], [2, 1])).toEqual(0)
     })
 
-    test('Filter ou missing keys', () => {
+    test('Filter out missing keys', () => {
         // Say relation B has keys ['c', 'b']
         // and our output tuple key order is ['a', 'b', 'c', 'd']
         // We should index B by ['b', 'c']

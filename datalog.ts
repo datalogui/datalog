@@ -739,6 +739,10 @@ export function* innerVariableJoinHelperGen(variables: Array<any>, remapKeyMetas
         return indexByKeyOrder
     })
 
+    const restKeyOrderSets = restKeyOrders.map(keyOrder => new Set(keyOrder))
+    // const restKeyLengths = restKeyOrderSet.map(s => srcK)
+    const restkeyLengths = restKeyOrderSets.map(keyOrderSet => srckeyOrder.filter(k => keyOrderSet.has(k)).length)
+
     const totalIterations = (2 ** variables.length) - 1 // minus 1 since we don't need to check the final state of all stable
     // const totalIterations = (2 ** variables.length)
     let currentIteration = 0
@@ -749,14 +753,13 @@ export function* innerVariableJoinHelperGen(variables: Array<any>, remapKeyMetas
             const relation = ((currentIteration >> index) & 1) ? variable.stable : variable.recent
             if (index !== 0) {
                 const relationKeyOrder = restKeyOrders[index - 1]
-                const relationKeyOrderSet = new Set(relationKeyOrder)
+                const relationKeyOrderSet = restKeyOrderSets[index - 1]
+                const keyLength = restkeyLengths[index - 1]
                 const indexedRelation = relation.indexBy(reverseRemapKeys(relationKeyOrder, remapKeyMetas[index]))
-                const keyLength = srckeyOrder.filter(k => relationKeyOrderSet.has(k)).length
                 // @ts-ignore
                 return new ExtendWithUnconstrained(
                     (src: any) => {
                         const keyTuple = src.filter((_: any, i: number) => relationKeyOrderSet.has(srckeyOrder[i]))
-                        const k = src[srckeyOrder.indexOf(relationKeyOrder[0])]
                         return keyTuple
                         // @ts-ignore
                         // return src[srckeyOrder.indexOf(relationKeyOrder[0])]
