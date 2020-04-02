@@ -66,7 +66,7 @@ export const Unconstrained = DataFrog.Unconstrained as symbol
 type OutputKeys = Array<string | number | symbol>
 // Like extend but supports output tuples with unconstrained values that may be resolved by other leapers
 export class ExtendWithUnconstrained<P, KName extends string | number | symbol, K, Val> implements Leaper<P, TupleizedUnconstrained<Val>> {
-    keyFunc: (P: P) => K
+    keyFunc: (P: P) => Array<any>
     outputKeys: OutputKeys
     relation: RelationIndex<KName, K, Val>
     outputTupleFunc: (relationVals: Tupleized<Val>) => TupleizedUnconstrained<Val>
@@ -74,13 +74,12 @@ export class ExtendWithUnconstrained<P, KName extends string | number | symbol, 
     startIdx: number = 0
     endIdx: number = 0
 
-    constructor(keyFunc: (P: P) => K, outputKeys: OutputKeys, relation: RelationIndex<KName, K, Val>) {
+    constructor(keyFunc: (P: P) => Array<any>, keyLength: number, outputKeys: OutputKeys, relation: RelationIndex<KName, K, Val>, relationKeyOrder: any) {
         this.keyFunc = keyFunc
         this.outputKeys = outputKeys
         this.relation = relation
-        const myKs = this.relation.keyOrdering.slice(1)
-        const unconstrainedIndices = []
-        const mapping = myKs.reduce((acc: { [key: number]: number }, k, i) => {
+        const myKs = relationKeyOrder.slice(keyLength)
+        const mapping = myKs.reduce((acc: { [key: number]: number }, k: any, i: number) => {
             acc[i] = outputKeys.indexOf(k)
             return acc
         }, {})
@@ -98,27 +97,35 @@ export class ExtendWithUnconstrained<P, KName extends string | number | symbol, 
 
     count(prefix: P): number {
         const key = this.keyFunc(prefix)
-        this.startIdx = DataFrog.gallop(this.relation.elements, (row: any) => DataFrog.sortTuple(row[0], key) === -1
+        this.startIdx = DataFrog.gallop(this.relation.elements, (row: any) => DataFrog.sortTuple(row.slice(0, key.length), key) === -1
         )
-        this.endIdx = DataFrog.gallop(this.relation.elements, (row: any) => DataFrog.sortTuple(row[0], key) === 0, this.startIdx + 1)
+
+        // Nothing found
+        if (this.startIdx === this.relation.elements.length) {
+            this.endIdx = this.startIdx
+            return 0
+        }
+
+        this.endIdx = DataFrog.gallop(this.relation.elements, (row: any) => DataFrog.sortTuple(row.slice(0, key.length), key) === 0, this.startIdx)
         return this.endIdx - this.startIdx
     }
 
     propose(prefix: P): Array<TupleizedUnconstrained<Val>> {
-        return this.relation.elements.slice(this.startIdx, this.endIdx).map(([_, ...rest]) => this.outputTupleFunc(rest))
+        const keyLen = this.keyFunc(prefix).length
+        return this.relation.elements.slice(this.startIdx, this.endIdx).map((tuple) => this.outputTupleFunc(tuple.slice(keyLen) as any))
     }
 
     // Could be faster if we mutate vals
     intersect(prefix: P, vals: Array<TupleizedUnconstrained<Val>>): Array<TupleizedUnconstrained<Val>> {
-        const key = this.keyFunc(prefix)
+        const keyLen = this.keyFunc(prefix).length
         let startIdx = this.startIdx - 1;
         const out: Array<TupleizedUnconstrained<Val>> = []
 
         let valIndex = 0
         while (valIndex < vals.length) {
             const val = vals[valIndex]
-            startIdx = DataFrog.gallop(this.relation.elements, ([_, ...rest]: any) => {
-                const output = this.outputTupleFunc(rest)
+            startIdx = DataFrog.gallop(this.relation.elements, (tuple: any) => {
+                const output = this.outputTupleFunc(tuple.slice(keyLen))
                 DataFrog.sortTuple(output[0], val[0]) === -1
             }, startIdx + 1)
 
@@ -222,6 +229,12 @@ export function joinKeyOrdering(keyOrderings: Array<Array<string>>): Array<strin
         return keyOrderings[0]
     }
 
+    let set = new Set<string>([])
+    keyOrderings.forEach((keyOrdering) => {
+        keyOrdering.forEach(k => set.add(k))
+    })
+    return [...set]
+
     let focusedKeyOrdering = 0
     let indicesInKeys = keyOrderings.map(_ => 0)
     const out: Array<string> = []
@@ -322,6 +335,7 @@ export class RelationIndex<KName extends string | number | symbol, K, Val> {
         }, {})
 
         const newData = this.elements.map(row => newkeyOrdering.map(k => row[keyMapping[k as string]])) as Array<[NewK, ...Array<ValueOf<NewVal>>]>
+        newData.sort((rowA, rowB) => DataFrog.sortTuple(rowA, rowB))
         return new RelationIndex(newData, newkeyOrdering)
     }
 
@@ -571,6 +585,14 @@ export class Variable<T> implements Tell<T> {
         throw new Error("Relation doesn't have any data. Can't infer schema")
     }
 
+    _remapKeys<In, Out>(newKeyOrdering: { [K in keyof In]: keyof Out }): Variable<Out> {
+        const out = new Variable<Out>()
+        out.stable = this.stable as any
+        out.recent = this.recent as any
+        out.toAdd = this.toAdd as any
+        return out
+    }
+
 
     assert(v: T) {
         if (this.toAdd.length === 0) {
@@ -662,17 +684,27 @@ export class Variable<T> implements Tell<T> {
 //     <V1, V2, V3>(logicFn: (joined: V1 & V2 & V3) => void, ...variables: [Variable<V1>, Variable<V2>, Variable<V3>]): void
 // }
 
-export function variableJoinHelperGen<V1>(...variables: [Variable<V1>]): Generator<V1>;
-export function variableJoinHelperGen<V1, V2>(...variables: [Variable<V1>, Variable<V2>]): Generator<V1 & V2>;
-export function variableJoinHelperGen<V1, V2, V3>(...variables: [Variable<V1>, Variable<V2>, Variable<V3>]): Generator<V1 & V2 & V3>;
-export function variableJoinHelperGen<V1, V2, V3, V4>(...variables: [Variable<V1>, Variable<V2>, Variable<V3>, Variable<V4>]): Generator<V1 & V2 & V3 & V4>;
+export function remapKeys(keyOrder: Array<string>, keyMap: { [key: string]: string }): Array<string> {
+    return keyOrder.map(k => k in keyMap ? keyMap[k] : k)
+}
 
-export function* variableJoinHelperGen(...variables: Array<any>): Generator<any> {
+export function reverseRemapKeys(keyOrder: Array<string>, keyMap: { [key: string]: string }): Array<string> {
+    const reversekeyMap = Object.entries(keyMap).map(([k, v]) => [v, k]).reduce((acc: any, [k, v]) => { acc[k] = v; return acc }, {})
+    return remapKeys(keyOrder, reversekeyMap)
+}
+
+type RemapKeys<In, Out> = { [K in keyof In]: keyof Out }
+export function variableJoinHelperGen<V1, V1Out = V1>(variables: [Variable<V1>], remapKeys: [RemapKeys<V1, V1Out>]): Generator<V1Out>;
+export function variableJoinHelperGen<V1, V2, V1Out = V1, V2Out = V2>(variables: [Variable<V1>, Variable<V2>], remapKeys: [RemapKeys<V1, V1Out>, RemapKeys<V2, V2Out>]): Generator<V1Out & V2Out>;
+export function variableJoinHelperGen<V1, V2, V3, V1Out = V1, V2Out = V2, V3Out = V3>(variables: [Variable<V1>, Variable<V2>, Variable<V3>], remapKeys: [RemapKeys<V1, V1Out>, RemapKeys<V2, V2Out>, RemapKeys<V3, V3Out>]): Generator<V1Out & V2Out & V3Out>;
+
+export function* variableJoinHelperGen(variables: Array<any>, remapKeys: Array<any> = []): Generator<any> {
     while (variables.some(v => v.changed())) {
-        yield* innerVariableJoinHelperGen(variables)
+        yield* innerVariableJoinHelperGen(variables, remapKeys)
     }
 }
-export function* innerVariableJoinHelperGen(variables: Array<any>): Generator<any> {
+
+export function* innerVariableJoinHelperGen(variables: Array<any>, remapKeyMetas: Array<any>): Generator<any> {
     // We have to compare:
     // All the recents
     // every stable against every other recent
@@ -691,12 +723,19 @@ export function* innerVariableJoinHelperGen(variables: Array<any>): Generator<an
     //
     // That looks a lot like counting.
 
-    const srckeyOrder = variables[0].keys()
-    const fullOutputKeyOrder = joinKeyOrdering(variables.map(v => v.keys()) as any)
+    // TODO order keys by remapKeyMetas
+    // const srckeyOrder = remapKeys(variables[0].keys(), remapKeyMetas[0])
+    const srckeyOrder: Array<string> = Object.values(remapKeyMetas[0])
+
+    // const fullOutputKeyOrder = joinKeyOrdering(variables.map((v, i) => remapKeys(v.keys(), remapKeyMetas[i]) as any))
+    const fullOutputKeyOrder = joinKeyOrdering(variables.map((_, i) => Object.values(remapKeyMetas[i])))
+
     const outputKeyOrder = fullOutputKeyOrder.slice(srckeyOrder.length)
-    const restKeyOrders = variables.slice(1).map(variable => {
+    // const restKeyOrders = variables.slice(1).map((variable, i) => {
+    const restKeyOrders = remapKeyMetas.slice(1).map((remapKeyMeta, i) => {
         // @ts-ignore
-        const indexByKeyOrder = filterKeys(variable.keys(), fullOutputKeyOrder)
+        // const indexByKeyOrder = filterKeys(remapKeys(variable.keys(), remapKeyMetas[i + 1]), fullOutputKeyOrder)
+        const indexByKeyOrder = filterKeys(Object.values(remapKeyMeta), fullOutputKeyOrder)
         return indexByKeyOrder
     })
 
@@ -709,23 +748,28 @@ export function* innerVariableJoinHelperGen(variables: Array<any>): Generator<an
             // check if we should return a recent or stable for this relation
             const relation = ((currentIteration >> index) & 1) ? variable.stable : variable.recent
             if (index !== 0) {
-                const indexedRelation = relation.indexBy(restKeyOrders[index - 1] as any)
+                const relationKeyOrder = restKeyOrders[index - 1]
+                const relationKeyOrderSet = new Set(relationKeyOrder)
+                const indexedRelation = relation.indexBy(reverseRemapKeys(relationKeyOrder, remapKeyMetas[index]))
+                const keyLength = srckeyOrder.filter(k => relationKeyOrderSet.has(k)).length
                 // @ts-ignore
                 return new ExtendWithUnconstrained(
                     (src: any) => {
+                        const keyTuple = src.filter((_: any, i: number) => relationKeyOrderSet.has(srckeyOrder[i]))
+                        const k = src[srckeyOrder.indexOf(relationKeyOrder[0])]
+                        return keyTuple
                         // @ts-ignore
-                        return src[srckeyOrder.indexOf(indexedRelation.keyOrdering[0])]
+                        // return src[srckeyOrder.indexOf(relationKeyOrder[0])]
                     },
+                    keyLength,
                     outputKeyOrder,
                     // @ts-ignore
-                    indexedRelation)
-                // return indexedRelation.extendWith((src) => {
-                //     // @ts-ignore
-                //     return src[srckeyOrder.indexOf(indexedRelation.keyOrdering[0])]
-                // })
+                    indexedRelation,
+                    relationKeyOrder
+                )
             }
             // @ts-ignore
-            return relation.indexBy(srckeyOrder)
+            return relation.indexBy(reverseRemapKeys(srckeyOrder, remapKeyMetas[index]))
         })
         for (let [sourceRow, extension] of leapJoinHelperGen(indexedRelations[0] as any, indexedRelations.slice(1) as any)) {
             const out: any = {}
@@ -743,11 +787,10 @@ export function* innerVariableJoinHelperGen(variables: Array<any>): Generator<an
 
         currentIteration++
     }
-
 }
 
 function isIdentityKeyMap(keyMap: { [key: string]: string }): boolean {
-    Object.entries(keyMap).every(([k, v]) => k === v)
+    return Object.entries(keyMap).every(([k, v]) => k === v)
 }
 
 // Transform those into two lists [[[A, {a: 'a', b: 'b'}]], [[B, {c: 'c'}]]]

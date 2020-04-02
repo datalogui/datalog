@@ -137,6 +137,15 @@ describe('Relation', () => {
         expect(out).toEqual(["a", "b", "c", "d"])
     })
 
+    test("join key ordering 2", () => {
+        const out = datalog.joinKeyOrdering([
+            ["a", "b"],
+            ["b", "a"],
+        ])
+
+        expect(out).toEqual(["a", "b"])
+    })
+
     test('LeapJoin3', () => {
         // { id: PersonID, name: String}
         const A = new datalog.RelationIndex<"a", number, { b: number }>([], ["a", "b"])
@@ -203,14 +212,18 @@ describe('Relation', () => {
 
         datalog.leapJoinHelper(A, [
             new datalog.ExtendWithUnconstrained(
-                ([_a, b]) => b,
+                ([_a, b]) => [b],
+                1,
                 ["c", "d"],
-                B
+                B,
+                ["b", "c"]
             ),
             new datalog.ExtendWithUnconstrained(
-                ([a, _b]) => a,
+                ([a, _b]) => [a],
+                1,
                 ["c", "d"],
-                C
+                C,
+                ["a", "c", "d"]
             ),
         ], ([a, b], rest) => {
             out.push([a, b, ...rest])
@@ -318,7 +331,7 @@ describe("Variables", () => {
         C.assert({ a: 1, c: 3, d: 7 })
 
         let out: Array<{ a: number, b: number, c: number, d: number }> = []
-        for (let join of datalog.variableJoinHelperGen(A, B, C)) {
+        for (let join of datalog.variableJoinHelperGen([A, B, C], [{ a: 'a', b: 'b' }, { b: 'b', c: 'c' }, { a: 'a', c: 'c', d: 'd' }])) {
             out.push(join)
         }
 
@@ -333,7 +346,7 @@ describe("Variables", () => {
         const B = new datalog.Variable<{ b: number, c: number }>()
         const C = new datalog.Variable<{ c: number, a: number, d: number }>()
 
-        let out: Array<{ a: number, b: number, c: number, d: number }> = [...datalog.variableJoinHelperGen(A, B, C)]
+        let out: Array<{ a: number, b: number, c: number, d: number }> = [...datalog.variableJoinHelperGen([A, B, C], [{ a: 'a', b: 'b' }, { b: 'b', c: 'c' }, { a: 'a', c: 'c', d: 'd' }])]
 
         expect(out).toEqual([])
     })
@@ -341,11 +354,11 @@ describe("Variables", () => {
     test("Joining 1 Variable", () => {
         const A = new datalog.Variable<{ a: number, b: number }>()
 
-        let out: Array<{ a: number, b: number }> = [...datalog.variableJoinHelperGen(A)]
+        let out: Array<{ a: number, b: number }> = [...datalog.variableJoinHelperGen([A], [{ a: 'a', b: 'b' }])]
         expect(out).toEqual([])
 
         A.assert({ a: 1, b: 2 })
-        out = [...datalog.variableJoinHelperGen(A)]
+        out = [...datalog.variableJoinHelperGen([A], [{ a: 'a', b: 'b' }])]
         expect(out).toEqual([{ a: 1, b: 2 }])
     })
 
@@ -353,14 +366,75 @@ describe("Variables", () => {
         const A = new datalog.Variable<{ a: number, b: number }>()
         const B = new datalog.Variable<{ b: number, c: number }>()
 
-        let out: Array<{ a: number, b: number, c: number }> = [...datalog.variableJoinHelperGen(A, B)]
+        let out: Array<{ a: number, b: number, c: number }> = [...datalog.variableJoinHelperGen([A, B], [{ a: 'a', b: 'b' }, { b: 'b', c: 'c' }])]
         expect(out).toEqual([])
 
         A.assert({ a: 1, b: 2 })
         A.assert({ a: 1, b: 4 })
         B.assert({ b: 2, c: 3 })
-        out = [...datalog.variableJoinHelperGen(A, B)]
+        out = [...datalog.variableJoinHelperGen([A, B], [{ a: 'a', b: 'b' }, { b: 'b', c: 'c' }])]
         expect(out).toEqual([{ a: 1, b: 2, c: 3 }])
+    })
+
+    test("Joining 1 Variable with remapped keys", () => {
+        const A = new datalog.Variable<{ a: number, b: number }>()
+
+        // let out: Array<{ a2: number, b2: number }> = [...datalog.variableJoinHelperGen([A], [{ a: 'a', b: 'b' }])]
+        // expect(out).toEqual([])
+
+        A.assert({ a: 1, b: 2 })
+        let out = [...datalog.variableJoinHelperGen<{ a: number, b: number }, { a2: number, b2: number }>([A], [{ a: 'a2', b: 'b2' }])]
+        expect(out).toEqual([{ a2: 1, b2: 2 }])
+    })
+
+    test("Joining same Variable with itself with remapped keys", () => {
+        const A = new datalog.Variable<{ a: number, b: number }>()
+
+        A.assert({ a: 1, b: 2 })
+        A.assert({ a: 2, b: 1 })
+        A.assert({ a: 3, b: 1 })
+        A.assert({ a: 5, b: 1 })
+        A.assert({ a: 3, b: 2 })
+        let out = [...datalog.variableJoinHelperGen<{ a: number, b: number }, { b: number, a: number }>([A, A], [{ a: 'a', b: 'b' }, { a: 'b', b: 'a' }])]
+        expect(out).toEqual([{ a: 1, b: 2 }, { a: 2, b: 1 }])
+    })
+
+    test("Joining non-overlapping relations", () => {
+        const A = new datalog.Variable<{ a: number, b: number }>()
+        const B = new datalog.Variable<{ c: number, d: number }>()
+
+        A.assert({ a: 1, b: 2 })
+        A.assert({ a: 3, b: 4 })
+        B.assert({ c: 5, d: 6 })
+        B.assert({ c: 7, d: 8 })
+
+        let out = [...datalog.variableJoinHelperGen<{ a: number, b: number }, { c: number, d: number }>([A, B], [{ a: 'a', b: 'b' }, { c: 'c', d: 'd' }])]
+        expect(out).toEqual([
+            {
+                "a": 1,
+                "b": 2,
+                "c": 5,
+                "d": 6,
+            },
+            {
+                "a": 1,
+                "b": 2,
+                "c": 7,
+                "d": 8,
+            },
+            {
+                "a": 3,
+                "b": 4,
+                "c": 5,
+                "d": 6,
+            },
+            {
+                "a": 3,
+                "b": 4,
+                "c": 7,
+                "d": 8,
+            }
+        ])
     })
 })
 
@@ -447,6 +521,16 @@ describe("recursiveForLoopJoin", () => {
 
         const it = datalog.recursiveForLoopJoin(parts, {}, mockRemapKeys, mockJoiner)
         expect([...it]).toEqual([{ a: 1, b: 2, b2: 2, c: 3, c2: 3 }])
+    })
+})
+
+describe("Helpers", () => {
+    test("Remap keys", () => {
+        const inKeys = ["a", "b", "c", "d"]
+        const mapping = { a: "a2", c: "c4", d: "d" }
+        const out = datalog.remapKeys(inKeys, mapping)
+        expect(out).toEqual(["a2", "b", "c4", "d"])
+        expect(datalog.reverseRemapKeys(out, mapping)).toEqual(inKeys)
     })
 })
 
@@ -537,8 +621,50 @@ describe("recursiveForLoopJoin", () => {
 //   }
 // }
 
+// Something like:
 
+// query(({a, b, c}: {a: number, b: number, c: number}) => {
+//  A({a, b})
+//  B({b, c})
+//  console.log(a, b, c)
+// })
 
+// Transform those into two lists: [[[A, {a: 'a', b: 'b'}], [B, {b: 'b',  c: 'c'}], { eval: "console.log(a,b,c)" }], []]
+// Becomes
 
+// function* () {
+//   for (let {a, b, c} of datalog.variableJoinHelperGen(A, B)) {
+//     console.log(a, b, c)
+//     yield {a, b, c}
+//   }
+// }
 
+// query(({a, b, c}: {a: number, b: number, c: number}) => {
+//  A({a, b})
+//  A({a: b, b: a})
+//  console.log(a, b)
+// })
 
+// Transform those into two lists: [[[A, {a: 'a', b: 'b'}], [B, {b: 'b',  c: 'c'}], { eval: "console.log(a,b,c)" }], []]
+// Becomes
+
+// function* () {
+//   for (let {a, b} of datalog.variableJoinHelperGen(A, remapKeys(A, {a: 'b', b: 'a'}))) {
+//     console.log(a, b, c)
+//     yield {a, b, c}
+//   }
+// }
+
+// query(({a, b, c}: {a: number, b: number, c: number}) => {
+//  A({a, b})
+//  A2({a, b})
+// })
+
+// Transform those into two lists: [[[A, {a: 'a', b: 'b'}], [B, {b: 'b',  c: 'c'}], { eval: "console.log(a,b,c)" }], []]
+// Becomes
+
+// function* () {
+//   for (let {a, b} of datalog.variableJoinHelperGen(A, remapKeys(A2, {a, b}))) {
+//     yield {a, b, c}
+//   }
+// }
