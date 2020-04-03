@@ -15,11 +15,6 @@ interface Leaper<P, V> {
     intersect: (prefix: P, vals: Array<V>) => Array<V>
 }
 
-// type ExtendWith = {
-//     keyFunc: (P: P) => K
-//     relation: RelationIndex<KName, K, Val>
-// }
-
 class ExtendWith<P, KName extends string | number | symbol, K, Val> implements Leaper<P, Tupleized<Val>> {
     keyFunc: (P: P) => K
     relation: RelationIndex<KName, K, Val>
@@ -162,62 +157,6 @@ export class ExtendWithUnconstrained<P, KName extends string | number | symbol, 
     }
 }
 
-// Like extend but supports output tuples with rest of keys
-export class ExtendWithAndCarry<P, KName extends string | number | symbol, K, Val> implements Leaper<P, [Tupleized<Val>, Partial<Val>]> {
-    keyFunc: (P: P) => K
-    outputTupleFunc: (val: Tupleized<Val>) => [Tupleized<Val>, Partial<Val>]
-    relation: RelationIndex<KName, K, Val>
-
-    startIdx: number = 0
-    endIdx: number = 0
-
-    /**
-     * outputTupleFunc should return first common tuples, then an object of the rest of the row
-     * i.e. if the relation is {a: number, c: number, d: number}, but the other leaper is {b: number: c:number}, the common tuple would be [c], and the rest would be {d: number}
-     */
-    constructor(keyFunc: (P: P) => K, outputTupleFunc: (val: Tupleized<Val>) => [Tupleized<Val>, Partial<Val>], relation: RelationIndex<KName, K, Val>) {
-        this.keyFunc = keyFunc
-        this.outputTupleFunc = outputTupleFunc
-        this.relation = relation
-    }
-
-    count(prefix: P): number {
-        const key = this.keyFunc(prefix)
-        this.startIdx = DataFrog.gallop(this.relation.elements, (row: any) => DataFrog.sortTuple(row[0], key) === -1
-        )
-        this.endIdx = DataFrog.gallop(this.relation.elements, (row: any) => DataFrog.sortTuple(row[0], key) === 0, this.startIdx + 1)
-        return this.endIdx - this.startIdx
-    }
-
-    propose(prefix: P): Array<[Tupleized<Val>, Partial<Val>]> {
-        return this.relation.elements.slice(this.startIdx, this.endIdx).map(([_, ...rest]) => this.outputTupleFunc(rest))
-    }
-
-    // Could be faster if we mutate vals
-    intersect(prefix: P, vals: Array<[Tupleized<Val>, Partial<Val>]>): Array<[Tupleized<Val>, Partial<Val>]> {
-        const key = this.keyFunc(prefix)
-        let startIdx = this.startIdx;
-        return vals.filter(val => {
-            startIdx = DataFrog.gallop(this.relation.elements, ([_, ...rest]: any) => {
-                const output = this.outputTupleFunc(rest)
-                DataFrog.sortTuple(output[0], val[0]) === -1
-            })
-            if (startIdx >= this.relation.elements.length) {
-                return false
-            }
-
-            // @ts-ignore
-            const output = this.outputTupleFunc(this.relation.elements[startIdx]?.slice(1))
-            const hasMatch = DataFrog.sortTuple(output[0], val[0]) === 0
-            if (hasMatch) {
-                // @ts-ignore
-                val[1] = { ...val[1], ...output[1] }
-            }
-            return hasMatch
-        })
-    }
-}
-
 /**
  * Returns a keyOrdering representing the joined key ordering
  * @param keyOrderings An array of keyOrderings
@@ -234,32 +173,6 @@ export function joinKeyOrdering(keyOrderings: Array<Array<string>>): Array<strin
         keyOrdering.forEach(k => set.add(k))
     })
     return [...set]
-
-    let focusedKeyOrdering = 0
-    let indicesInKeys = keyOrderings.map(_ => 0)
-    const out: Array<string> = []
-    while (focusedKeyOrdering < keyOrderings.length) {
-        const focusedKeyOrder = keyOrderings[focusedKeyOrdering]
-        const focusedKey = focusedKeyOrder[indicesInKeys[focusedKeyOrdering]]
-        // Add the focused key to our output
-        out.push(focusedKey)
-
-        // Increment the position of any matching key orderings
-        keyOrderings.slice(focusedKeyOrdering + 1).forEach((keyOrdering, j) => {
-            const i = j + focusedKeyOrdering + 1
-            if (keyOrdering[indicesInKeys[i]] === focusedKey) {
-                indicesInKeys[i] = indicesInKeys[i] + 1
-            }
-        })
-
-        indicesInKeys[focusedKeyOrdering] = indicesInKeys[focusedKeyOrdering] + 1
-
-        while (focusedKeyOrdering < keyOrderings.length && indicesInKeys[focusedKeyOrdering] >= keyOrderings[focusedKeyOrdering].length) {
-            focusedKeyOrdering++
-        }
-    }
-
-    return out
 }
 
 export function filterKeys(keysToKeep: Array<string>, keyOrder: Array<string>) {
@@ -375,96 +288,6 @@ export class RelationIndex<KName extends string | number | symbol, K, Val> {
     }
 }
 
-
-type FindExpression = (<A>(a: A) => {}) | (<A, B>(a: A, b: B) => {}) | (<A, B, C>(a: A, b: B, c: C) => {}) | (<A, B, C, D>(a: A, b: B, c: C, d: D) => {})
-
-function find(findExpression: FindExpression): any {
-}
-
-type FreeVariableObj<Val extends {}> = { [key: string]: FreeVariable<Val[keyof Val]> | Val[keyof Val] }
-
-// For each query there is a collection of relations and free variableObjs on them
-class DatalogContext<Val> {
-    context: Array<[MultiIndexRelation<Val>, FreeVariableObj<Val>]> = []
-    queryPlan() {
-        // TODO speed this up
-        // Hacky for now. join everything, then filter
-
-        // Build our join groups
-        let joinsByKey: {
-            [key: string]: Array<MultiIndexRelation<Val>>
-        } = {}
-        for (let index = 0; index < this.context.length; index++) {
-            const [currentRelation] = this.context[index]
-            const ks = currentRelation.keys()
-            const keyToJoinBy = ks.find(k => !!joinsByKey[k as string])
-            // No key in our join set. let's add a new one
-            if (keyToJoinBy === undefined) {
-                joinsByKey[ks[0] as string] = [currentRelation]
-            }
-        }
-
-        // Now that we have the groups we are going to join by, let's join each group. Then try the above again until we end up with a single group.
-        // TODO
-
-
-
-    }
-}
-
-class DatalogContextManager<Val> {
-    ctxs: Array<DatalogContext<Val>> = []
-    add(part: [MultiIndexRelation<Val>, FreeVariableObj<Val>]) {
-        if (this.ctxs.length === 0) {
-            throw new Error("Ctx not initialized!")
-        }
-
-        this.ctxs[this.ctxs.length - 1].context.push(part)
-    }
-
-
-    pushCtx() {
-        this.ctxs.push(new DatalogContext())
-    }
-
-    popCtx(): DatalogContext<Val> {
-        const ctx = this.ctxs.pop(); if (ctx === undefined) {
-            throw new Error("No context to pop")
-        } return ctx
-    }
-}
-
-const datalogContextManager = new DatalogContextManager()
-
-// Represents any possible value of T, can be constrained.
-export class FreeVariable<T> {
-    // Null means it is unconstrained(!)
-    availableValues: Array<T> | null = null
-    isUnconstrained(): boolean {
-        return this.availableValues === null
-    }
-    constrain(values: Array<T>) {
-        if (this.availableValues === null) {
-            this.availableValues = values
-        }
-
-        let valuesIdx = 0;
-        this.availableValues.filter((availVals) => {
-        })
-
-        const output: Array<T> = []
-        // TODO speed this puppy up!
-        this.availableValues.map(availValue => {
-            values.map(constrainValue => {
-                if (constrainValue === availValue) {
-                    output.push(constrainValue)
-                }
-            })
-        })
-
-        this.availableValues = output
-    }
-}
 
 interface Tell<Val> {
     assert: (v: Val) => void
@@ -835,6 +658,82 @@ function isEmptyObj(obj: {}) {
     }
 
     return true;
+}
+
+interface QueryableVariable<T extends {}> extends Tell<T> {
+    (keyMap: Partial<T>): void
+    assert(datum: T): void
+}
+
+
+class QueryContext {
+    variables: Array<any> = []
+    remapKeys: Array<any> = []
+    constants: Array<any> = []
+
+    addVariable<T>(v: Variable<T>, remapKeys: any, constantVals: any) {
+        this.variables.push(v)
+        this.remapKeys.push(remapKeys)
+        this.constants.push(constantVals)
+
+    }
+    clear() {
+        this.variables = []
+        this.remapKeys = []
+        this.constants = []
+    }
+}
+
+function fromEntries<V>(entries: Array<[string, V]>): Object {
+    const o = {}
+    for (let [k, v] of entries) {
+        // @ts-ignore
+        o[k] = v
+    }
+    return o
+}
+
+const queryContext = new QueryContext()
+export function newQueryableVariable<T extends {}>(): QueryableVariable<T> {
+    const variable = new Variable<T>()
+    const queryableVariable = (keymap: any) => {
+        const constants = fromEntries(Object.entries(keymap).filter(([k, v]: any) => {
+            if (typeof v === 'object' && v && 'ns' in v && v.ns === FreeVarNS) {
+                return false
+            }
+            return true
+        }))
+        const remapKeys = fromEntries(Object.entries(keymap).map(([k, v]: any) => {
+            if (typeof v === 'object' && v && 'ns' in v && v.ns === FreeVarNS) {
+                return [k, v.k]
+            }
+            return [k, k]
+        }))
+        console.log("Key map is", keymap, 'constants', constants, 'remapKeys', remapKeys)
+        queryContext.addVariable(variable, remapKeys, constants)
+    }
+
+    queryableVariable.assert = (args: T) => variable.assert(args)
+    return queryableVariable
+
+}
+
+const FreeVarNS = Symbol("FreeVariable")
+const FreeVarGenerator: any = new Proxy({}, {
+    get: function (obj, prop) {
+        return { ns: FreeVarNS, k: prop }
+    }
+});
+
+type QueryFn<Out extends {}> = (freeVars: Out) => void
+export function query<Out extends {}>(queryFn: QueryFn<Out>): Generator<Out> {
+    // @ts-ignore – a trick
+    queryFn(FreeVarGenerator)
+    console.log("Context is", queryContext)
+    // @ts-ignore
+    const iterator = variableJoinHelperGen(queryContext.variables, queryContext.remapKeys, queryContext.constants)
+    queryContext.clear()
+    return iterator
 }
 
 // Transform those into two lists [[[A, {a: 'a', b: 'b'}]], [[B, {c: 'c'}]]]

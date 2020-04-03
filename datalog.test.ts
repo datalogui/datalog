@@ -156,49 +156,6 @@ describe('Relation', () => {
         expect(out).toEqual(["a", "b"])
     })
 
-    test('LeapJoin3', () => {
-        // { id: PersonID, name: String}
-        const A = new datalog.RelationIndex<"a", number, { b: number }>([], ["a", "b"])
-        const B = new datalog.RelationIndex<"b", number, { c: number }>([], ["b", "c"])
-        const C = new datalog.RelationIndex<"a", number, { c: number, d: number }>([], ["a", "c", "d"])
-
-        A.assert({ a: 1, b: 2 })
-        B.assert({ b: 2, c: 3 })
-        B.assert({ b: 2, c: 4 })
-        C.assert({ a: 1, c: 3, d: 0 })
-
-        const out: Array<[number, number, number, any]> = []
-        datalog.leapJoinHelper(A, [
-            new datalog.ExtendWithAndCarry(
-                ([_, b]) => b,
-                (out => [out, {}]), // nothing to carry
-                B
-            ),
-            new datalog.ExtendWithAndCarry(
-                ([a, _]) => a,
-                ([out, d]) => [[out], { d }],
-                C
-            )
-
-        ], ([a, b], [[c], carried]) => {
-            out.push([a, b, c, carried])
-        })
-
-        expect(out).toEqual([[1, 2, 3, { d: 0 }]])
-        const jointKeyOrder = datalog.joinKeyOrdering([
-            ["a", "b"],
-            ["b", "c"],
-            ["a", "c", "d"]
-        ])
-
-        const objects = out.map(tuple => tuple.slice(0, tuple.length - 1).reduce((acc, val, i) => {
-            acc[jointKeyOrder[i]] = val
-            return acc
-        }, tuple[tuple.length - 1]))
-
-        expect(objects).toEqual([{ a: 1, b: 2, c: 3, d: 0 }])
-    });
-
     test('Using the Unconstrained symbol in joins to specify columns that are not constrained', () => {
         const A = new datalog.RelationIndex<"a", number, { b: number }>([], ["a", "b"])
         const B = new datalog.RelationIndex<"b", number, { c: number }>([], ["b", "c"])
@@ -399,7 +356,7 @@ describe("Variables", () => {
     })
 
 
-    test.only("Joining 2 Variables with constants", () => {
+    test("Joining 2 Variables with constants", () => {
         const A = new datalog.Variable<{ a: number, b: number }>()
         const B = new datalog.Variable<{ b: number, c: number }>()
 
@@ -454,6 +411,18 @@ describe("Variables", () => {
         A.assert({ a: 3, b: 2 })
         let out = [...datalog.variableJoinHelperGen<{ a: number, b: number }, { b: number, a: number }>([A, A], [{ a: 'a', b: 'b' }, { a: 'b', b: 'a' }], [{}, {}])]
         expect(out).toEqual([{ a: 1, b: 2 }, { a: 2, b: 1 }])
+    })
+
+    test("Joining same Variable with itself with remapped keys", () => {
+        const A = new datalog.Variable<{ a: number, b: number }>()
+
+        A.assert({ a: 3, b: 4 })
+        A.assert({ a: 1, b: 2 })
+        A.assert({ a: 1, b: 1 })
+        // @ts-ignore
+        let out = [...datalog.variableJoinHelperGen([A, A], [{ a: 'a' }, { b: 'a' }], [{}, {}])]
+        // TODO this should be just one value
+        expect(out).toEqual([{ a: 1 }, { a: 1 }])
     })
 
     test("Joining non-overlapping relations", () => {
@@ -591,6 +560,28 @@ describe("Helpers", () => {
     })
 })
 
+describe("Query", () => {
+    test("What does the queryFn do?", () => {
+        const A = datalog.newQueryableVariable<{ a: number, b: number }>()
+        const B = datalog.newQueryableVariable<{ b: number, c: number }>()
+        A.assert({ a: 1, b: 2 })
+        B.assert({ b: 2, c: 3 })
+
+        const queryResult = datalog.query(({ a, b, c }: any) => {
+            A({ a, b })
+            B({ b, c })
+        })
+        expect([...queryResult]).toEqual([{ a: 1, b: 2, c: 3 }])
+    })
+})
+
+
+
+
+
+
+
+// ------------------------------ random notes
 // I need to convert the pretty syntax into the above
 
 // Something like:
