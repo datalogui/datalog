@@ -339,6 +339,27 @@ export class RelationIndex<KName extends string | number | symbol, K, Val> {
         return new RelationIndex(newData, newkeyOrdering)
     }
 
+    filterElements(constants: Partial<{ [KeyName in KName]: K } & Val>): RelationIndex<KName, K, Val> {
+        if (isEmptyObj(constants)) {
+            return this
+        }
+
+        const a = new RelationIndex(
+            this.elements.filter(row => {
+                return row.every((v, i) => {
+                    const constantVal = constants[this.keyOrdering[i]]
+                    if (constantVal !== undefined) {
+                        return v === constantVal
+                    }
+                    return true
+                })
+            }),
+            this.keyOrdering
+        )
+        return a
+
+    }
+
     assert(element: { [KeyName in KName]: K } & Val) {
         // @ts-ignore
         this.insertRow(this.keyOrdering.map(k => element[k]))
@@ -694,17 +715,17 @@ export function reverseRemapKeys(keyOrder: Array<string>, keyMap: { [key: string
 }
 
 type RemapKeys<In, Out> = { [K in keyof In]: keyof Out }
-export function variableJoinHelperGen<V1, V1Out = V1>(variables: [Variable<V1>], remapKeys: [RemapKeys<V1, V1Out>]): Generator<V1Out>;
-export function variableJoinHelperGen<V1, V2, V1Out = V1, V2Out = V2>(variables: [Variable<V1>, Variable<V2>], remapKeys: [RemapKeys<V1, V1Out>, RemapKeys<V2, V2Out>]): Generator<V1Out & V2Out>;
-export function variableJoinHelperGen<V1, V2, V3, V1Out = V1, V2Out = V2, V3Out = V3>(variables: [Variable<V1>, Variable<V2>, Variable<V3>], remapKeys: [RemapKeys<V1, V1Out>, RemapKeys<V2, V2Out>, RemapKeys<V3, V3Out>]): Generator<V1Out & V2Out & V3Out>;
+export function variableJoinHelperGen<V1, V1Out = V1>(variables: [Variable<V1>], remapKeys: [RemapKeys<V1, V1Out>], constants: [Partial<V1>]): Generator<V1Out>;
+export function variableJoinHelperGen<V1, V2, V1Out = V1, V2Out = V2>(variables: [Variable<V1>, Variable<V2>], remapKeys: [RemapKeys<V1, V1Out>, RemapKeys<V2, V2Out>], constants: [Partial<V1>, Partial<V2>]): Generator<V1Out & V2Out>;
+export function variableJoinHelperGen<V1, V2, V3, V1Out = V1, V2Out = V2, V3Out = V3>(variables: [Variable<V1>, Variable<V2>, Variable<V3>], remapKeys: [RemapKeys<V1, V1Out>, RemapKeys<V2, V2Out>, RemapKeys<V3, V3Out>], constants: [Partial<V1>, Partial<V2>, Partial<V3>]): Generator<V1Out & V2Out & V3Out>;
 
-export function* variableJoinHelperGen(variables: Array<any>, remapKeys: Array<any> = []): Generator<any> {
+export function* variableJoinHelperGen(variables: Array<any>, remapKeys: Array<any>, constants: Array<any> = []): Generator<any> {
     while (variables.some(v => v.changed())) {
-        yield* innerVariableJoinHelperGen(variables, remapKeys)
+        yield* innerVariableJoinHelperGen(variables, remapKeys, constants)
     }
 }
 
-export function* innerVariableJoinHelperGen(variables: Array<any>, remapKeyMetas: Array<any>): Generator<any> {
+export function* innerVariableJoinHelperGen(variables: Array<any>, remapKeyMetas: Array<any>, constants: Array<any>): Generator<any> {
     // We have to compare:
     // All the recents
     // every stable against every other recent
@@ -755,7 +776,12 @@ export function* innerVariableJoinHelperGen(variables: Array<any>, remapKeyMetas
                 const relationKeyOrder = restKeyOrders[index - 1]
                 const relationKeyOrderSet = restKeyOrderSets[index - 1]
                 const keyLength = restkeyLengths[index - 1]
-                const indexedRelation = relation.indexBy(reverseRemapKeys(relationKeyOrder, remapKeyMetas[index]))
+                let indexedRelation = relation.indexBy(reverseRemapKeys(relationKeyOrder, remapKeyMetas[index]))
+                // Filter the relation with known constants. Could make joins faster
+                if (constants[index] !== undefined) {
+                    indexedRelation = indexedRelation.filterElements(constants[index])
+                }
+
                 // @ts-ignore
                 return new ExtendWithUnconstrained(
                     (src: any) => {
@@ -771,8 +797,13 @@ export function* innerVariableJoinHelperGen(variables: Array<any>, remapKeyMetas
                     relationKeyOrder
                 )
             }
-            // @ts-ignore
-            return relation.indexBy(reverseRemapKeys(srckeyOrder, remapKeyMetas[index]))
+            let indexedRelation = relation.indexBy(reverseRemapKeys(srckeyOrder, remapKeyMetas[index]))
+            // Filter the relation with known constants. Could make joins faster
+            if (constants[index] !== undefined) {
+                indexedRelation = indexedRelation.filterElements(constants[index])
+            }
+
+            return indexedRelation
         })
         for (let [sourceRow, extension] of leapJoinHelperGen(indexedRelations[0] as any, indexedRelations.slice(1) as any)) {
             const out: any = {}
@@ -794,6 +825,16 @@ export function* innerVariableJoinHelperGen(variables: Array<any>, remapKeyMetas
 
 function isIdentityKeyMap(keyMap: { [key: string]: string }): boolean {
     return Object.entries(keyMap).every(([k, v]) => k === v)
+}
+
+function isEmptyObj(obj: {}) {
+    for (var prop in obj) {
+        if (obj.hasOwnProperty(prop)) {
+            return false;
+        }
+    }
+
+    return true;
 }
 
 // Transform those into two lists [[[A, {a: 'a', b: 'b'}]], [[B, {c: 'c'}]]]

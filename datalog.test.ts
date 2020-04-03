@@ -56,6 +56,16 @@ describe('Relation', () => {
         expect(person.elements).toEqual([[0, "marco"], [1, "daiyi"]])
     });
 
+    test('Can filter by constants', () => {
+        // { id: PersonID, name: String}
+        const person = newPerson()
+
+        person.assert({ id: 0, name: "marco" })
+        person.assert({ id: 1, name: "daiyi" })
+        const filteredPeople = person.filterElements({ name: "marco" })
+        expect(filteredPeople.elements).toEqual([[0, "marco"]])
+    });
+
     test('indexBy', () => {
         const A = new datalog.RelationIndex<"a", number, { b: number }>([], ["a", "b"])
         A.assert({ a: 1, b: 2 })
@@ -331,7 +341,7 @@ describe("Variables", () => {
         C.assert({ a: 1, c: 3, d: 7 })
 
         let out: Array<{ a: number, b: number, c: number, d: number }> = []
-        for (let join of datalog.variableJoinHelperGen([A, B, C], [{ a: 'a', b: 'b' }, { b: 'b', c: 'c' }, { a: 'a', c: 'c', d: 'd' }])) {
+        for (let join of datalog.variableJoinHelperGen([A, B, C], [{ a: 'a', b: 'b' }, { b: 'b', c: 'c' }, { a: 'a', c: 'c', d: 'd' }], [{}, {}, {}])) {
             out.push(join)
         }
 
@@ -346,7 +356,7 @@ describe("Variables", () => {
         const B = new datalog.Variable<{ b: number, c: number }>()
         const C = new datalog.Variable<{ c: number, a: number, d: number }>()
 
-        let out: Array<{ a: number, b: number, c: number, d: number }> = [...datalog.variableJoinHelperGen([A, B, C], [{ a: 'a', b: 'b' }, { b: 'b', c: 'c' }, { a: 'a', c: 'c', d: 'd' }])]
+        let out: Array<{ a: number, b: number, c: number, d: number }> = [...datalog.variableJoinHelperGen([A, B, C], [{ a: 'a', b: 'b' }, { b: 'b', c: 'c' }, { a: 'a', c: 'c', d: 'd' }], [{}, {}, {}])]
 
         expect(out).toEqual([])
     })
@@ -354,11 +364,23 @@ describe("Variables", () => {
     test("Joining 1 Variable", () => {
         const A = new datalog.Variable<{ a: number, b: number }>()
 
-        let out: Array<{ a: number, b: number }> = [...datalog.variableJoinHelperGen([A], [{ a: 'a', b: 'b' }])]
+        let out: Array<{ a: number, b: number }> = [...datalog.variableJoinHelperGen([A], [{ a: 'a', b: 'b' }], [{}])]
         expect(out).toEqual([])
 
         A.assert({ a: 1, b: 2 })
-        out = [...datalog.variableJoinHelperGen([A], [{ a: 'a', b: 'b' }])]
+        out = [...datalog.variableJoinHelperGen([A], [{ a: 'a', b: 'b' }], [{}])]
+        expect(out).toEqual([{ a: 1, b: 2 }])
+    })
+
+    test("Joining 1 Variable with constants", () => {
+        const A = new datalog.Variable<{ a: number, b: number }>()
+
+        let out: Array<{ a: number, b: number }> = [...datalog.variableJoinHelperGen([A], [{ a: 'a', b: 'b' }], [{}])]
+        expect(out).toEqual([])
+
+        A.assert({ a: 1, b: 2 })
+        A.assert({ a: 2, b: 3 })
+        out = [...datalog.variableJoinHelperGen([A], [{ a: 'a', b: 'b' }], [{ a: 1 }])]
         expect(out).toEqual([{ a: 1, b: 2 }])
     })
 
@@ -366,13 +388,48 @@ describe("Variables", () => {
         const A = new datalog.Variable<{ a: number, b: number }>()
         const B = new datalog.Variable<{ b: number, c: number }>()
 
-        let out: Array<{ a: number, b: number, c: number }> = [...datalog.variableJoinHelperGen([A, B], [{ a: 'a', b: 'b' }, { b: 'b', c: 'c' }])]
+        let out: Array<{ a: number, b: number, c: number }> = [...datalog.variableJoinHelperGen([A, B], [{ a: 'a', b: 'b' }, { b: 'b', c: 'c' }], [{}, {}])]
         expect(out).toEqual([])
 
         A.assert({ a: 1, b: 2 })
         A.assert({ a: 1, b: 4 })
         B.assert({ b: 2, c: 3 })
-        out = [...datalog.variableJoinHelperGen([A, B], [{ a: 'a', b: 'b' }, { b: 'b', c: 'c' }])]
+        out = [...datalog.variableJoinHelperGen([A, B], [{ a: 'a', b: 'b' }, { b: 'b', c: 'c' }], [{}, {}])]
+        expect(out).toEqual([{ a: 1, b: 2, c: 3 }])
+    })
+
+
+    test.only("Joining 2 Variables with constants", () => {
+        const A = new datalog.Variable<{ a: number, b: number }>()
+        const B = new datalog.Variable<{ b: number, c: number }>()
+
+        let out: Array<{ a: number, b: number, c: number }> = [...datalog.variableJoinHelperGen([A, B], [{ a: 'a', b: 'b' }, { b: 'b', c: 'c' }], [{}, {}])]
+        expect(out).toEqual([])
+
+        A.assert({ a: 1, b: 2 })
+        A.assert({ a: 1, b: 4 })
+        A.assert({ a: 2, b: 2 })
+        A.assert({ a: 3, b: 2 })
+        B.assert({ b: 2, c: 3 })
+        out = [...datalog.variableJoinHelperGen([A, B], [{ a: 'a', b: 'b' }, { b: 'b', c: 'c' }], [{ a: 1 }, {}])]
+        expect(out).toEqual([{ a: 1, b: 2, c: 3 }])
+
+    })
+
+    test("Joining 2 Variables with constants 2", () => {
+        const A = new datalog.Variable<{ a: number, b: number }>()
+        const B = new datalog.Variable<{ b: number, c: number }>()
+
+        let out: Array<{ a: number, b: number, c: number }> = [...datalog.variableJoinHelperGen([A, B], [{ a: 'a', b: 'b' }, { b: 'b', c: 'c' }], [{}, {}])]
+        expect(out).toEqual([])
+
+        A.assert({ a: 1, b: 2 })
+        A.assert({ a: 1, b: 4 })
+        A.assert({ a: 2, b: 5 })
+        A.assert({ a: 3, b: 4 })
+        B.assert({ b: 2, c: 3 })
+
+        out = [...datalog.variableJoinHelperGen([A, B], [{ a: 'a', b: 'b' }, { b: 'b', c: 'c' }], [{}, { c: 3 }])]
         expect(out).toEqual([{ a: 1, b: 2, c: 3 }])
     })
 
@@ -383,7 +440,7 @@ describe("Variables", () => {
         // expect(out).toEqual([])
 
         A.assert({ a: 1, b: 2 })
-        let out = [...datalog.variableJoinHelperGen<{ a: number, b: number }, { a2: number, b2: number }>([A], [{ a: 'a2', b: 'b2' }])]
+        let out = [...datalog.variableJoinHelperGen<{ a: number, b: number }, { a2: number, b2: number }>([A], [{ a: 'a2', b: 'b2' }], [{}])]
         expect(out).toEqual([{ a2: 1, b2: 2 }])
     })
 
@@ -395,7 +452,7 @@ describe("Variables", () => {
         A.assert({ a: 3, b: 1 })
         A.assert({ a: 5, b: 1 })
         A.assert({ a: 3, b: 2 })
-        let out = [...datalog.variableJoinHelperGen<{ a: number, b: number }, { b: number, a: number }>([A, A], [{ a: 'a', b: 'b' }, { a: 'b', b: 'a' }])]
+        let out = [...datalog.variableJoinHelperGen<{ a: number, b: number }, { b: number, a: number }>([A, A], [{ a: 'a', b: 'b' }, { a: 'b', b: 'a' }], [{}, {}])]
         expect(out).toEqual([{ a: 1, b: 2 }, { a: 2, b: 1 }])
     })
 
@@ -408,7 +465,7 @@ describe("Variables", () => {
         B.assert({ c: 5, d: 6 })
         B.assert({ c: 7, d: 8 })
 
-        let out = [...datalog.variableJoinHelperGen<{ a: number, b: number }, { c: number, d: number }>([A, B], [{ a: 'a', b: 'b' }, { c: 'c', d: 'd' }])]
+        let out = [...datalog.variableJoinHelperGen<{ a: number, b: number }, { c: number, d: number }>([A, B], [{ a: 'a', b: 'b' }, { c: 'c', d: 'd' }], [{}, {}])]
         expect(out).toEqual([
             {
                 "a": 1,
