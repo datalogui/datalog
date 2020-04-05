@@ -462,6 +462,19 @@ describe("Variables", () => {
             }
         ])
     })
+
+    test("Cross Product Variable Join (no common keys)", () => {
+        const A = new datalog.Variable<{ a: number, b: number }>()
+        const B = new datalog.Variable<{ c: number }>()
+
+        A.assert({ a: 1, b: 2 })
+        B.assert({ c: 3 })
+        B.assert({ c: 4 })
+
+        let out: Array<{ a: number, b: number, c: number }> = [...datalog.crossJoinVariables([A, B])]
+        expect(out).toEqual([{ a: 1, b: 2, c: 3 }, { a: 1, b: 2, c: 4 }])
+    })
+
 })
 
 describe("recursiveForLoopJoin", () => {
@@ -561,7 +574,7 @@ describe("Helpers", () => {
 })
 
 describe("Query", () => {
-    test("What does the queryFn do?", () => {
+    test("Hello World join", () => {
         const A = datalog.newQueryableVariable<{ a: number, b: number }>()
         const B = datalog.newQueryableVariable<{ b: number, c: number }>()
         A.assert({ a: 1, b: 2 })
@@ -573,7 +586,84 @@ describe("Query", () => {
         })
         expect([...queryResult]).toEqual([{ a: 1, b: 2, c: 3 }])
     })
+
+    test("People Example", () => {
+        type ID = number
+        const People = datalog.newQueryableVariable<{ name: string, id: ID }>()
+        const ParentOf = datalog.newQueryableVariable<{ parentID: ID, childID: ID }>()
+
+        let ids = 0
+
+        People.assert({ name: "FooChild", id: ids++ })
+        People.assert({ name: "FooDad", id: ids++ })
+        People.assert({ name: "FooMom", id: ids++ })
+
+        People.assert({ name: "BarChild", id: ids++ })
+        People.assert({ name: "BarDad", id: ids++ })
+        People.assert({ name: "BarMom", id: ids++ })
+
+        ParentOf.assert({ parentID: 1, childID: 0 }) // 1 = FooDad, 0 = FooChild
+        ParentOf.assert({ parentID: 2, childID: 0 }) // 2 = FooMom, 0 = FooChild
+
+        ParentOf.assert({ parentID: 4, childID: 3 }) // 4 = BarDad, 3 = BarChild
+        ParentOf.assert({ parentID: 5, childID: 3 }) // 5 = BarMom, 3 = BarChild
+
+        // Find every parent
+        let queryResult = datalog.query<{ parentName: string, parentID: number }>(({ parentName, parentID }) => {
+            ParentOf({ parentID })
+            People({ id: parentID, name: parentName })
+        })
+
+        expect([...queryResult]).toEqual([{ parentID: 1, parentName: "FooDad" }, { parentID: 2, parentName: "FooMom" }, { parentID: 4, parentName: "BarDad" }, { parentID: 5, parentName: "BarMom" }])
+    })
+
+    test("People Example", () => {
+        type ID = number
+        const People = datalog.newQueryableVariable<{ name: string, id: ID }>()
+        const ParentOf = datalog.newQueryableVariable<{ parentID: ID, childID: ID }>()
+
+        let ids = 0
+
+        People.assert({ name: "FooChild", id: ids++ })
+        People.assert({ name: "FooDad", id: ids++ })
+        People.assert({ name: "FooMom", id: ids++ })
+
+        ParentOf.assert({ parentID: 1, childID: 0 }) // 1 = FooDad, 0 = FooChild
+        ParentOf.assert({ parentID: 2, childID: 0 }) // 1 = FooMom, 0 = FooChild
+
+        // Who's FooChild's parent?
+        let queryResult = datalog.query<{ parentName: string, parentID: number }>(({ parentName, childID, parentID }: any) => {
+            People({ name: "FooChild", id: childID })
+            ParentOf({ childID, parentID })
+            People({ id: parentID, name: parentName })
+        })
+        // Equivalent SQL query: (https://www.db-fiddle.com/f/t1TA5umdcoBuG8ZPcyMWTx/1)
+        // select child.name as childName, ParentOf.childID, ParentOf.parentID, parent.name as parentName
+        // from People child, People parent, ParentOf
+        // where child.name = 'FooChild' and child.id = childID and parent.id = parentID
+
+
+        expect([...queryResult]).toEqual([{ parentID: 1, parentName: "FooDad", childID: 0 }, { parentID: 2, parentName: "FooMom", childID: 0 }])
+    })
 })
+
+// const fs = require('fs')
+// const homedir = require('os').homedir();
+// const titles = fs.readFileSync(`${homedir}/datasets/imdb/title1k.basics.tsv`).toString().split('\n').slice(1)
+// describe.only("IMDB examples", () => {
+//     test("Movie titles", () => {
+//         const MovieTitle = datalog.newQueryableVariable<{ tconst: string, titleType: string, primaryTitle: string, originalTitle: string, isAdult: number, startYear: string, endYear: string, runTimeMinutes: number, genres: string }>()
+//         for (const title of titles) {
+//             const [tconst, titleType, primaryTitle, originalTitle, isAdult, startYear, endYear, runTimeMinutes, genres] = title.split('\t')
+//             MovieTitle.assert({ tconst, titleType, primaryTitle, originalTitle, isAdult: parseInt(isAdult), startYear, endYear, runTimeMinutes: parseInt(runTimeMinutes), genres })
+//         }
+//         const queryResult = datalog.query(({ primaryTitle, startYear }: any) => {
+//             People({ name: "FooChild", id: c })
+//             ParentOf({ c, p })
+//             People({ id: p, name: parentName })
+//         })
+//     })
+// })
 
 
 

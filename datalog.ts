@@ -6,6 +6,9 @@ type ValueOf<T> = T[keyof T];
 type Tupleized<T> = Array<ValueOf<T>>
 type TupleizedUnconstrained<T> = Array<ValueOf<T> | typeof Unconstrained>
 
+type DEBUG_LEVEL_ENUM = 0 | 1
+const DEBUG_LEVEL = 0
+
 // type Tupleized<K, Val> = [K, ...Array<ValueOf<Val>>]
 
 interface Leaper<P, V> {
@@ -31,7 +34,13 @@ class ExtendWith<P, KName extends string | number | symbol, K, Val> implements L
         const key = this.keyFunc(prefix)
         this.startIdx = DataFrog.gallop(this.relation.elements, (row: any) => DataFrog.sortTuple(row[0], key) === -1
         )
-        this.endIdx = DataFrog.gallop(this.relation.elements, (row: any) => DataFrog.sortTuple(row[0], key) === 0, this.startIdx + 1)
+        // Nothing found
+        if (this.startIdx === this.relation.elements.length) {
+            this.endIdx = this.startIdx
+            return 0
+        }
+
+        this.endIdx = DataFrog.gallop(this.relation.elements, (row: any) => DataFrog.sortTuple(row[0], key) === 0, this.startIdx)
         return this.endIdx - this.startIdx
     }
 
@@ -113,24 +122,39 @@ export class ExtendWithUnconstrained<P, KName extends string | number | symbol, 
     // Could be faster if we mutate vals
     intersect(prefix: P, vals: Array<TupleizedUnconstrained<Val>>): Array<TupleizedUnconstrained<Val>> {
         const keyLen = this.keyFunc(prefix).length
-        let startIdx = this.startIdx - 1;
+        let startIdx = this.startIdx;
         const out: Array<TupleizedUnconstrained<Val>> = []
 
         let valIndex = 0
-        while (valIndex < vals.length) {
+        while (valIndex < vals.length && startIdx < this.relation.elements.length) {
             const val = vals[valIndex]
-            startIdx = DataFrog.gallop(this.relation.elements, (tuple: any) => {
-                const output = this.outputTupleFunc(tuple.slice(keyLen))
-                DataFrog.sortTuple(output[0], val[0]) === -1
-            }, startIdx + 1)
-
-            if (startIdx >= this.relation.elements.length) {
-                break
-            }
 
             // @ts-ignore
-            const output = this.outputTupleFunc(this.relation.elements[startIdx]?.slice(1))
-            const hasMatch = DataFrog.sortTuple(output, val) === 0
+            const output = this.outputTupleFunc(this.relation.elements[startIdx]?.slice(keyLen))
+            const ordResult = DataFrog.sortTuple(output, val)
+
+            // No more results for this val
+            if (ordResult > 0) {
+                valIndex++
+                continue
+            }
+
+            const hasMatch = ordResult === 0
+            if (!hasMatch) {
+                startIdx = DataFrog.gallop(this.relation.elements, (tuple: any) => {
+                    const output = this.outputTupleFunc(tuple.slice(keyLen))
+                    return DataFrog.sortTuple(output, val) === -1
+                }, startIdx)
+                continue
+            }
+            startIdx++
+
+            // @ts-ignore
+            // const output = this.outputTupleFunc(this.relation.elements[startIdx]?.slice(keyLen))
+            // const hasMatch = DataFrog.sortTuple(output, val) === 0
+            if (DEBUG_LEVEL > 0) {
+                console.log("Comparing my output:", output, "val", val, this.relation, hasMatch)
+            }
 
             if (hasMatch) {
                 // Check for unconstrained
@@ -204,6 +228,9 @@ export function* leapJoinHelperGen<KName extends string | number | symbol, KVal,
                 console.warn('!!!!! - No leapers!', leaper)
             }
             const count = leaper.count(row)
+            if (DEBUG_LEVEL > 0) {
+                console.log("Leaper", leaper, "is proposing", count, "vals")
+            }
             if (count < minCount) {
                 minCount = count
                 minIndex = index
@@ -213,12 +240,20 @@ export function* leapJoinHelperGen<KName extends string | number | symbol, KVal,
         // 2. Have the least-proposing leaper propose their values.
         if (minCount > 0) {
             let vals = leapers[minIndex].propose(row)
+            if (DEBUG_LEVEL > 0) {
+                console.log("Leaper", leapers[minIndex], "proposed", vals)
+            }
             // 3. Have the other leapers restrict the proposals.
 
             for (let index = 0; index < leapers.length; index++) {
                 if (index !== minIndex) {
                     const leaper = leapers[index];
                     vals = leaper.intersect(row, vals)
+                    if (DEBUG_LEVEL > 0) {
+                        console.log("Leaper ", leapers[index], "intesersected", vals)
+                        // @ts-ignore
+                        console.log("Leaper it's elements were", leapers[index].relation.elements)
+                    }
                 }
             }
 
@@ -417,6 +452,7 @@ export class Variable<T> implements Tell<T> {
     stable: Relation<T> = new Relation<T>()
     recent: Relation<T> = new Relation<T>()
     toAdd: Array<Relation<T>> = []
+    _recentChanges: Array<Relation<T>> = []
 
     keys(): Array<string | number | symbol> {
         if (this.stable.length) {
@@ -444,6 +480,17 @@ export class Variable<T> implements Tell<T> {
         }
         this.toAdd[0].assert(v)
     }
+
+    // recentChanges(): Generator<T>{
+    // function* () {
+
+    //     this._recentChanges.map(relation => {
+    //         const indexedRelation = relation.relations[0]
+    //         const keyOrder = indexedRelation.keyOrdering
+    //         indexedRelation.elements.map((e, i) => [keyOrder[i], e])
+    //     })
+    // }
+    // }
 
     changed() {
         // 1. Merge this.recent into this.stable.
@@ -543,12 +590,13 @@ export function variableJoinHelperGen<V1, V2, V1Out = V1, V2Out = V2>(variables:
 export function variableJoinHelperGen<V1, V2, V3, V1Out = V1, V2Out = V2, V3Out = V3>(variables: [Variable<V1>, Variable<V2>, Variable<V3>], remapKeys: [RemapKeys<V1, V1Out>, RemapKeys<V2, V2Out>, RemapKeys<V3, V3Out>], constants: [Partial<V1>, Partial<V2>, Partial<V3>]): Generator<V1Out & V2Out & V3Out>;
 
 export function* variableJoinHelperGen(variables: Array<any>, remapKeys: Array<any>, constants: Array<any> = []): Generator<any> {
+    // yield* innerVariableJoinHelperGen(variables, remapKeys, constants, true)
     while (variables.some(v => v.changed())) {
-        yield* innerVariableJoinHelperGen(variables, remapKeys, constants)
+        yield* innerVariableJoinHelperGen(variables, remapKeys, constants, false)
     }
 }
 
-export function* innerVariableJoinHelperGen(variables: Array<any>, remapKeyMetas: Array<any>, constants: Array<any>): Generator<any> {
+export function* innerVariableJoinHelperGen(variables: Array<any>, remapKeyMetas: Array<any>, constants: Array<any>, stableOnly: boolean): Generator<any> {
     // We have to compare:
     // All the recents
     // every stable against every other recent
@@ -587,9 +635,15 @@ export function* innerVariableJoinHelperGen(variables: Array<any>, remapKeyMetas
     // const restKeyLengths = restKeyOrderSet.map(s => srcK)
     const restkeyLengths = restKeyOrderSets.map(keyOrderSet => srckeyOrder.filter(k => keyOrderSet.has(k)).length)
 
-    const totalIterations = (2 ** variables.length) - 1 // minus 1 since we don't need to check the final state of all stable
-    // const totalIterations = (2 ** variables.length)
+    let totalIterations = (2 ** variables.length) - 1 // minus 1 since we don't need to check the final state of all stable
     let currentIteration = 0
+
+    // If we only want to query the stable relations. This will pick only the stable relations from all the variables and only run once
+    if (stableOnly) {
+        totalIterations += 1
+        currentIteration = totalIterations - 1
+    }
+
     // let currentIteration = totalIterations - 1
     while (currentIteration < totalIterations) {
         const indexedRelations = variables.map((variable, index) => {
@@ -631,10 +685,16 @@ export function* innerVariableJoinHelperGen(variables: Array<any>, remapKeyMetas
         for (let [sourceRow, extension] of leapJoinHelperGen(indexedRelations[0] as any, indexedRelations.slice(1) as any)) {
             const out: any = {}
             srckeyOrder.reduce((acc: any, k: any, i: any) => {
+                if (isAutoKey(k)) {
+                    return acc
+                }
                 acc[k] = sourceRow[i]
                 return acc
             }, out)
             outputKeyOrder.reduce((acc, k, i) => {
+                if (isAutoKey(k)) {
+                    return acc
+                }
                 // @ts-ignore
                 acc[k] = extension[i]
                 return acc
@@ -648,6 +708,17 @@ export function* innerVariableJoinHelperGen(variables: Array<any>, remapKeyMetas
 
 function isIdentityKeyMap(keyMap: { [key: string]: string }): boolean {
     return Object.entries(keyMap).every(([k, v]) => k === v)
+}
+
+function variableJoinIntoVariable(outVar: Variable<any>, variables: Array<any>, remapKeyMetas: Array<any>, constants: Array<any>, stableOnly: boolean) {
+    // @ts-ignore
+    for (const outDatum of variableJoinHelperGen(variables, remapKeys, constants)) {
+        outVar.assert(outDatum)
+    }
+}
+
+export function* crossJoinVariables(variables: Array<any>) {
+    yield* variableJoinHelperGen(variables as any, variables.map(v => fromEntries(v.keys().map((k) => [k, k]))) as any, [])
 }
 
 function isEmptyObj(obj: {}) {
@@ -694,6 +765,18 @@ function fromEntries<V>(entries: Array<[string, V]>): Object {
 }
 
 const queryContext = new QueryContext()
+/**
+ * Returns a auto generated suffix key (for when a key needs to be defined, but isn't from the user)
+ * @param keyName
+ */
+function autoKey(keyName: string) {
+    return '___' + keyName + Math.random().toString(36).substring(2, 10)
+}
+
+function isAutoKey(k: string): boolean {
+    return k.startsWith('___')
+}
+
 export function newQueryableVariable<T extends {}>(): QueryableVariable<T> {
     const variable = new Variable<T>()
     const queryableVariable = (keymap: any) => {
@@ -703,15 +786,24 @@ export function newQueryableVariable<T extends {}>(): QueryableVariable<T> {
             }
             return true
         }))
+        const inferredKeys = variable.keys()
         const remapKeys = fromEntries(Object.entries(keymap).map(([k, v]: any) => {
             if (typeof v === 'object' && v && 'ns' in v && v.ns === FreeVarNS) {
                 return [k, v.k]
             }
-            return [k, k]
+            return [k, autoKey(k)]
         }))
-        console.log("Key map is", keymap, 'constants', constants, 'remapKeys', remapKeys)
+        // fill in missing keys
+        inferredKeys.forEach(k => {
+            if (!(k in remapKeys)) {
+                // @ts-ignore
+                remapKeys[k] = autoKey(k)
+            }
+        })
+
         queryContext.addVariable(variable, remapKeys, constants)
     }
+    queryableVariable._innerVar = variable
 
     queryableVariable.assert = (args: T) => variable.assert(args)
     return queryableVariable
@@ -725,11 +817,10 @@ const FreeVarGenerator: any = new Proxy({}, {
     }
 });
 
-type QueryFn<Out extends {}> = (freeVars: Out) => void
-export function query<Out extends {}>(queryFn: QueryFn<Out>): Generator<Out> {
+type QueryFn<Out> = (freeVars: Out) => void
+export function query<Out>(queryFn: QueryFn<Out>): Generator<Out> {
     // @ts-ignore – a trick
     queryFn(FreeVarGenerator)
-    console.log("Context is", queryContext)
     // @ts-ignore
     const iterator = variableJoinHelperGen(queryContext.variables, queryContext.remapKeys, queryContext.constants)
     queryContext.clear()
