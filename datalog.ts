@@ -205,16 +205,11 @@ export function filterKeys(keysToKeep: Array<string>, keyOrder: Array<string>) {
 }
 
 type LeapJoinLogicFn<KVal, SourceVal, Extension> = (sourceRow: [KVal, ...Array<ValueOf<SourceVal>>], extension: Extension) => void
-
 export function leapJoinHelper<KName extends string | number | symbol, KVal, SourceVal, Extension>(source: RelationIndex<KName, KVal, SourceVal>, leapers: Array<Leaper<[KVal, ...Array<ValueOf<SourceVal>>], Extension>>, logic: LeapJoinLogicFn<KVal, SourceVal, Extension>) {
-    for (let rowAndExtension of leapJoinHelperGen(source, leapers)) {
-        logic(...rowAndExtension)
-    }
-}
-export function* leapJoinHelperGen<KName extends string | number | symbol, KVal, SourceVal, Extension>(source: RelationIndex<KName, KVal, SourceVal>, leapers: Array<Leaper<[KVal, ...Array<ValueOf<SourceVal>>], Extension>>): Generator<[[KVal, ...Array<ValueOf<SourceVal>>], Extension], void, undefined> {
     if (leapers.length === 0) {
+        console.log("source is", source)
         // @ts-ignore
-        yield* source.elements.map(row => [row, []])
+        source.elements.forEach(row => logic(row, []))
         return
     }
     for (const row of source.elements) {
@@ -257,9 +252,9 @@ export function* leapJoinHelperGen<KName extends string | number | symbol, KVal,
                 }
             }
 
-            // 4. Yield the val
+            // 4. Call `logic` on each value
             for (const val of vals) {
-                yield [row, val]
+                logic(row, val)
             }
         }
 
@@ -585,18 +580,26 @@ export function reverseRemapKeys(keyOrder: Array<string>, keyMap: { [key: string
 }
 
 type RemapKeys<In, Out> = { [K in keyof In]: keyof Out }
-export function variableJoinHelperGen<V1, V1Out = V1>(variables: [Variable<V1>], remapKeys: [RemapKeys<V1, V1Out>], constants: [Partial<V1>]): Generator<V1Out>;
-export function variableJoinHelperGen<V1, V2, V1Out = V1, V2Out = V2>(variables: [Variable<V1>, Variable<V2>], remapKeys: [RemapKeys<V1, V1Out>, RemapKeys<V2, V2Out>], constants: [Partial<V1>, Partial<V2>]): Generator<V1Out & V2Out>;
-export function variableJoinHelperGen<V1, V2, V3, V1Out = V1, V2Out = V2, V3Out = V3>(variables: [Variable<V1>, Variable<V2>, Variable<V3>], remapKeys: [RemapKeys<V1, V1Out>, RemapKeys<V2, V2Out>, RemapKeys<V3, V3Out>], constants: [Partial<V1>, Partial<V2>, Partial<V3>]): Generator<V1Out & V2Out & V3Out>;
+export function variableJoinHelper<V1, V1Out = V1>(logicFn: (joined: V1) => void, variables: [Variable<V1>], remapKeys: [RemapKeys<V1, V1Out>], constants: [Partial<V1>]): void;
+export function variableJoinHelper<V1, V2, V1Out = V1, V2Out = V2>(logicFn: (joined: V1 & V2) => void, variables: [Variable<V1>, Variable<V2>], remapKeys: [RemapKeys<V1, V1Out>, RemapKeys<V2, V2Out>], constants: [Partial<V1>, Partial<V2>]): void;
+export function variableJoinHelper<V1, V2, V3, V1Out = V1, V2Out = V2, V3Out = V3>(logicFn: (joined: V1 & V2 & V3) => void, variables: [Variable<V1>, Variable<V2>, Variable<V3>], remapKeys: [RemapKeys<V1, V1Out>, RemapKeys<V2, V2Out>, RemapKeys<V3, V3Out>], constants: [Partial<V1>, Partial<V2>, Partial<V3>]): void;
 
-export function* variableJoinHelperGen(variables: Array<any>, remapKeys: Array<any>, constants: Array<any> = []): Generator<any> {
-    // yield* innerVariableJoinHelperGen(variables, remapKeys, constants, true)
+export function variableJoinHelper(logicFn: (source: any) => void, variables: Array<any>, remapKeys: Array<any>, constants: Array<any> = []) {
     while (variables.some(v => v.changed())) {
-        yield* innerVariableJoinHelperGen(variables, remapKeys, constants, false)
+        innerVariableJoinHelper(logicFn, variables, remapKeys, constants, false)
     }
 }
 
-export function* innerVariableJoinHelperGen(variables: Array<any>, remapKeyMetas: Array<any>, constants: Array<any>, stableOnly: boolean): Generator<any> {
+export function* variableJoinHelperGen(variables: Array<any>, remapKeys: Array<any>, constants: Array<any> = []): Generator<any> {
+    const out: any[] = []
+    // @ts-ignore
+    variableJoinHelper(joint => out.push(joint), variables, remapKeys, constants)
+    for (const i of out) {
+        yield i
+    }
+}
+
+export function innerVariableJoinHelper(logicFn: (source: any) => void, variables: Array<any>, remapKeyMetas: Array<any>, constants: Array<any> = [], stableOnly: boolean) {
     // We have to compare:
     // All the recents
     // every stable against every other recent
@@ -682,7 +685,7 @@ export function* innerVariableJoinHelperGen(variables: Array<any>, remapKeyMetas
 
             return indexedRelation
         })
-        for (let [sourceRow, extension] of leapJoinHelperGen(indexedRelations[0] as any, indexedRelations.slice(1) as any)) {
+        leapJoinHelper(indexedRelations[0] as any, indexedRelations.slice(1) as any, (sourceRow, extension: any) => {
             const out: any = {}
             srckeyOrder.reduce((acc: any, k: any, i: any) => {
                 if (isAutoKey(k)) {
@@ -698,9 +701,9 @@ export function* innerVariableJoinHelperGen(variables: Array<any>, remapKeyMetas
                 // @ts-ignore
                 acc[k] = extension[i]
                 return acc
-            }, out);
-            yield out
-        }
+            }, out)
+            logicFn(out)
+        })
 
         currentIteration++
     }
@@ -718,7 +721,7 @@ function variableJoinIntoVariable(outVar: Variable<any>, variables: Array<any>, 
 }
 
 export function* crossJoinVariables(variables: Array<any>) {
-    yield* variableJoinHelperGen(variables as any, variables.map(v => fromEntries(v.keys().map((k) => [k, k]))) as any, [])
+    // yield* variableJoinHelperGen(variables as any, variables.map(v => fromEntries(v.keys().map((k) => [k, k]))) as any, [])
 }
 
 function isEmptyObj(obj: {}) {
