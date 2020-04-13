@@ -460,6 +460,16 @@ export class Variable<T> implements Tell<T> {
         throw new Error("Relation doesn't have any data. Can't infer schema")
     }
 
+    recentData(): Array<T> | null {
+        if (!this.changed()) {
+            return null
+        }
+        return this.recent.relations[0].elements.map(row => {
+            // @ts-ignore
+            return fromEntries(row.map((v, i) => [this.recent.relations[0].keyOrdering[i], v]))
+        })
+    }
+
     _remapKeys<In, Out>(newKeyOrdering: { [K in keyof In]: keyof Out }): Variable<Out> {
         const out = new Variable<Out>()
         out.stable = this.stable as any
@@ -767,7 +777,7 @@ function fromEntries<V>(entries: Array<[string, V]>): Object {
     return o
 }
 
-const queryContext = new QueryContext()
+let queryContext = new QueryContext()
 /**
  * Returns a auto generated suffix key (for when a key needs to be defined, but isn't from the user)
  * @param keyName
@@ -780,8 +790,8 @@ function isAutoKey(k: string): boolean {
     return k.startsWith('___')
 }
 
-export function newQueryableVariable<T extends {}>(): QueryableVariable<T> {
-    const variable = new Variable<T>()
+export function newQueryableVariable<T extends {}>(existingVar?: Variable<T>, isDerived?: boolean): QueryableVariable<T> {
+    const variable = existingVar || new Variable<T>()
     const queryableVariable = (keymap: any) => {
         const constants = fromEntries(Object.entries(keymap).filter(([k, v]: any) => {
             if (typeof v === 'object' && v && 'ns' in v && v.ns === FreeVarNS) {
@@ -808,7 +818,12 @@ export function newQueryableVariable<T extends {}>(): QueryableVariable<T> {
     }
     queryableVariable._innerVar = variable
 
-    queryableVariable.assert = (args: T) => variable.assert(args)
+    if (!isDerived) {
+        queryableVariable.assert = (args: T) => variable.assert(args)
+    }
+
+    queryableVariable.recentData = variable.recentData
+
     return queryableVariable
 
 }
@@ -821,13 +836,59 @@ const FreeVarGenerator: any = new Proxy({}, {
 });
 
 type QueryFn<Out> = (freeVars: Out) => void
-export function query<Out>(queryFn: QueryFn<Out>): Generator<Out> {
+export function query<Out>(queryFn: QueryFn<Out>): Variable<Out> {
+    queryContext = new QueryContext()
     // @ts-ignore – a trick
     queryFn(FreeVarGenerator)
+    // Split variables into parts
+    const parts: any = [[]]
+    let keySetSeen = new Set(Object.values(queryContext.remapKeys[0]))
+    // console.log("Source keys are", queryContext)
+    queryContext.remapKeys.forEach((remapKeys, i) => {
+        if (i === 0) {
+            return parts[0] = [[queryContext.variables[0]], [remapKeys], [queryContext.constants[0]]]
+        }
+
+        const lastPart = parts[parts.length - 1]
+        const vals = Object.values(remapKeys)
+        if (vals.some(k => keySetSeen.has(k))) {
+            lastPart[0].push(queryContext.variables[i])
+            lastPart[1].push(queryContext.remapKeys[i])
+            lastPart[2].push(queryContext.constants[i])
+            vals.forEach(k => { keySetSeen.add(k) })
+        } else {
+            keySetSeen = new Set(vals)
+            const newPart = [
+                [queryContext.variables[i]],
+                [queryContext.remapKeys[i]],
+                [queryContext.constants[i]]
+            ]
+            parts.push(newPart)
+        }
+    })
+
+    const variableParts = parts.map(([variables, remapKeys, constants]) => {
+        const outVar = new Variable()
+        variableJoinHelper((join) => { outVar.assert(join) }, variables, remapKeys, constants)
+        return outVar
+    })
+    console.warn("Variale:", variableParts)
+
+    const outVar = new Variable()
+    const partRemapKeys = variableParts.map(v => fromEntries(v.keys().map(k => [k, k])))
+    variableJoinHelper((join) => { outVar.assert(join) }, variableParts, partRemapKeys, variableParts.map(() => { }))
+    variableParts
+
+    // while (outVar.changed()) { }
+    // console.log("Variable Parts", variableParts.map(p => p.stable.relations[0].elements))
+    // console.log("Remap keys", partRemapKeys)
+    // console.log("Final join", outVar.stable.relations[0])
+
     // @ts-ignore
-    const iterator = variableJoinHelperGen(queryContext.variables, queryContext.remapKeys, queryContext.constants)
-    queryContext.clear()
-    return iterator
+    // const iterator = variableJoinHelperGen(queryContext.variables, queryContext.remapKeys, queryContext.constants)
+    // queryContext.clear()
+    // return iterator
+    return outVar
 }
 
 // Transform those into two lists [[[A, {a: 'a', b: 'b'}]], [[B, {c: 'c'}]]]

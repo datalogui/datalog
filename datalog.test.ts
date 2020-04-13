@@ -396,6 +396,7 @@ describe("Variables", () => {
         // expect(out).toEqual([])
 
         A.assert({ a: 1, b: 2 })
+        // @ts-ignore
         let out = [...datalog.variableJoinHelperGen<{ a: number, b: number }, { a2: number, b2: number }>([A], [{ a: 'a2', b: 'b2' }], [{}])]
         expect(out).toEqual([{ a2: 1, b2: 2 }])
     })
@@ -408,6 +409,7 @@ describe("Variables", () => {
         A.assert({ a: 3, b: 1 })
         A.assert({ a: 5, b: 1 })
         A.assert({ a: 3, b: 2 })
+        // @ts-ignore
         let out = [...datalog.variableJoinHelperGen<{ a: number, b: number }, { b: number, a: number }>([A, A], [{ a: 'a', b: 'b' }, { a: 'b', b: 'a' }], [{}, {}])]
         expect(out).toEqual([{ a: 1, b: 2 }, { a: 2, b: 1 }])
     })
@@ -433,6 +435,7 @@ describe("Variables", () => {
         B.assert({ c: 5, d: 6 })
         B.assert({ c: 7, d: 8 })
 
+        // @ts-ignore
         let out = [...datalog.variableJoinHelperGen<{ a: number, b: number }, { c: number, d: number }>([A, B], [{ a: 'a', b: 'b' }, { c: 'c', d: 'd' }], [{}, {}])]
         expect(out).toEqual([
             {
@@ -583,7 +586,7 @@ describe("Query", () => {
             A({ a, b })
             B({ b, c })
         })
-        expect([...queryResult]).toEqual([{ a: 1, b: 2, c: 3 }])
+        expect([...queryResult.recentData()]).toEqual([{ a: 1, b: 2, c: 3 }])
     })
 
     test("People Example", () => {
@@ -613,7 +616,7 @@ describe("Query", () => {
             People({ id: parentID, name: parentName })
         })
 
-        expect([...queryResult]).toEqual([{ parentID: 1, parentName: "FooDad" }, { parentID: 2, parentName: "FooMom" }, { parentID: 4, parentName: "BarDad" }, { parentID: 5, parentName: "BarMom" }])
+        expect([...queryResult.recentData()]).toEqual([{ parentID: 1, parentName: "FooDad" }, { parentID: 2, parentName: "FooMom" }, { parentID: 4, parentName: "BarDad" }, { parentID: 5, parentName: "BarMom" }])
     })
 
     test("People Example", () => {
@@ -642,7 +645,45 @@ describe("Query", () => {
         // where child.name = 'FooChild' and child.id = childID and parent.id = parentID
 
 
-        expect([...queryResult]).toEqual([{ parentID: 1, parentName: "FooDad", childID: 0 }, { parentID: 2, parentName: "FooMom", childID: 0 }])
+        expect([...queryResult.recentData()]).toEqual([{ parentID: 1, parentName: "FooDad", childID: 0 }, { parentID: 2, parentName: "FooMom", childID: 0 }])
+    })
+
+    test("People Example 3 joins", () => {
+        type ID = number
+        const People = datalog.newQueryableVariable<{ name: string, id: ID }>()
+        const ParentOf = datalog.newQueryableVariable<{ parentID: ID, childID: ID }>()
+        const A = datalog.newQueryableVariable<{ a: number, b: number }>()
+        const B = datalog.newQueryableVariable<{ b: number, c: number }>()
+
+        let ids = 0
+
+        People.assert({ name: "FooChild", id: ids++ })
+        People.assert({ name: "FooDad", id: ids++ })
+        People.assert({ name: "FooMom", id: ids++ })
+
+        ParentOf.assert({ parentID: 1, childID: 0 }) // 1 = FooDad, 0 = FooChild
+        ParentOf.assert({ parentID: 2, childID: 0 }) // 1 = FooMom, 0 = FooChild
+
+        A.assert({ a: 1, b: 2 })
+        B.assert({ b: 2, c: 3 })
+
+        // Who's FooChild's parent?
+        let queryResult = datalog.query<{ id: number, parentName: string, parentID: number, a: number, b: number, c: number }>(({ parentName, childID, parentID, a, b, c }: any) => {
+            People({ name: "FooChild", id: childID })
+            ParentOf({ childID, parentID })
+            People({ id: parentID, name: parentName })
+            A({ a, b })
+            B({ b, c })
+        })
+        // Equivalent SQL query: (https://www.db-fiddle.com/f/t1TA5umdcoBuG8ZPcyMWTx/1)
+        // select child.name as childName, ParentOf.childID, ParentOf.parentID, parent.name as parentName
+        // from People child, People parent, ParentOf
+        // where child.name = 'FooChild' and child.id = childID and parent.id = parentID
+
+        // console.log("data", queryResult)
+        const data = queryResult.recentData()
+
+        expect(data).toEqual([{ parentID: 1, parentName: "FooDad", childID: 0, a: 1, b: 2, c: 3 }, { parentID: 2, parentName: "FooMom", childID: 0, a: 1, b: 2, c: 3 }])
     })
 })
 
