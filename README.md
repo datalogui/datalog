@@ -1,3 +1,4 @@
+![CI](https://github.com/MarcoPolo/datalog-ui/workflows/CI/badge.svg?branch=master)
 ## Features
 
 * Differential Datalog
