@@ -1,6 +1,7 @@
 import * as datalog from './datalog'
 // @ts-ignore
-import * as DataFrog from 'datafrog-js'
+// import * as DataFrog from 'datafrog-js'
+import * as DataFrog from '../datafrog-js/index.js'
 
 type PersonID = number
 

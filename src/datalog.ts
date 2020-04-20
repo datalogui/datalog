@@ -1,5 +1,5 @@
 // @ts-ignore
-import * as DataFrog from 'datafrog-js'
+import * as DataFrog from '../datafrog-js/index.js'
 
 type ValueOf<T> = T[keyof T];
 

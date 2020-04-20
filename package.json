@@ -13,9 +13,6 @@
     "webpack-cli": "^3.3.11"
 
   },
-  "dependencies": {
-    "datafrog-js": "file:./datafrog-js"
-  },
   "scripts": {
     "test": "yarn jest"
   }
