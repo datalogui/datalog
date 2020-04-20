@@ -1,0 +1,18 @@
+{
+  "name": "datafrog-js",
+  "version": "0.0.1",
+  "description": "A simple datalog engine based on Datafrog",
+  "main": "index.js",
+  "repository": "https://github.com/MarcoPolo/datafrog-js",
+  "author": "marcopolo",
+  "license": "MIT",
+  "dependencies": {
+    "lodash": "^4.17.15"
+  },
+  "devDependencies": {
+    "jest": "^25.1.0"
+  },
+  "scripts": {
+    "test": "jest"
+  }
+}
