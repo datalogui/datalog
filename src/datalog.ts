@@ -459,6 +459,7 @@ export class Variable<T> implements Tell<T> {
     recent: Relation<T> = new Relation<T>()
     toAdd: Array<Relation<T>> = []
     _recentChanges: Array<Relation<T>> = []
+    _subscribers: Array<(v: T) => void> = []
 
     clone(): Variable<T> {
         const cloned = new Variable<T>()
@@ -503,6 +504,15 @@ export class Variable<T> implements Tell<T> {
             this.toAdd.push(new Relation<T>())
         }
         this.toAdd[0].assert(v)
+        this._subscribers.forEach(s => s(v))
+    }
+
+    onAssert(f: (v: T) => void) {
+        this._subscribers.push(f)
+    }
+
+    removeOnAssert(f: (v: T) => void) {
+        this._subscribers = this._subscribers.filter(onAssertFn => f !== onAssertFn)
     }
 
     // recentChanges(): Generator<T>{
@@ -763,10 +773,28 @@ function isEmptyObj(obj: {}) {
     return true;
 }
 
-interface Table<T extends {}> extends Tell<T> {
+interface Queryable<T extends {}> {
     (keyMap: Partial<T>): void
-    assert(datum: T): void
+}
+
+interface Viewable<T extends {}> {
     view(): Variable<T>
+}
+
+interface Table<T extends {}> extends Tell<T>, Queryable<T>, Viewable<T> {
+}
+
+interface MaterializedTable<T extends {}> extends Queryable<T>, Viewable<T> {
+    runQuery: () => void
+}
+
+function newMaterializedTable<T>(v: Variable<T>, runQuery: () => void): MaterializedTable<T> {
+    const outVar = new Variable<T>()
+    const innerTable = newTable(v, true)
+    const materializedTable = innerTable as unknown as MaterializedTable<T>
+    materializedTable.runQuery = runQuery
+    return materializedTable
+
 }
 
 
@@ -843,8 +871,15 @@ export function newTable<T extends {}>(existingVar?: Variable<T>, isDerived?: bo
     }
 
     // table.clone = () => variable.clone()
-    table.view = () => variable.clone()
+    table.view = () => {
+        let cloned = variable.clone()
+        // It would be nice to use something like a weakref here
+        // TODO: This is a potential source of memory leaks since the view can never
+        // be reclaimed unless the table also gets reclaimed.
+        variable.onAssert(v => cloned.assert(v))
 
+        return cloned
+    }
 
     // queryableVariable.changed = variable.changed
 
@@ -860,8 +895,10 @@ const FreeVarGenerator: any = new Proxy({}, {
 
 export type SchemaOf<V> = V extends Table<infer T> ? T : never
 
+const EmptyObj = {}
+
 type QueryFn<Out> = (freeVars: Out) => void
-export function query<Out>(queryFn: QueryFn<Out>): Table<Out> {
+export function query<Out>(queryFn: QueryFn<Out>): MaterializedTable<Out> {
     queryContext = new QueryContext()
     // @ts-ignore – a trick
     queryFn(FreeVarGenerator)
@@ -895,29 +932,33 @@ export function query<Out>(queryFn: QueryFn<Out>): Table<Out> {
     // @ts-ignore
     const variableParts = parts.map(([variables, remapKeys, constants]) => {
         const outVar = new Variable()
-        variableJoinHelper((join) => { outVar.assert(join) }, variables, remapKeys, constants)
-        return outVar
+        const runInnerQuery = () => variableJoinHelper((join) => { outVar.assert(join) }, variables, remapKeys, constants)
+        return [outVar, runInnerQuery]
     })
 
-    const outVar = newTable()
+    // const outVar: MaterializedTable<Out> = newTable<Out>(undefined, true)
+    const outVar = new Variable<Out>()
     // @ts-ignore
-    const partRemapKeys = variableParts.map(v => fromEntries(v.keys().map(k => [k, k])))
-    // @ts-ignore
-    variableJoinHelper((join) => { outVar.assert(join) }, variableParts, partRemapKeys, variableParts.map(() => { }))
-    variableParts
+    const joinFn = (join) => { outVar.assert(join) }
+    const innerVars = variableParts.map(([v]: any) => v)
 
-    // Remove the ability to assert
-    // @ts-ignore
-    outVar.assert = undefined
+    const constantParts = variableParts.map(() => EmptyObj)
 
-    // while (outVar.changed()) { }
-    // console.log("Variable Parts", variableParts.map(p => p.stable.relations[0].elements))
-    // console.log("Remap keys", partRemapKeys)
-    // console.log("Final join", outVar.stable.relations[0])
+    const runQuery = () => {
+        variableParts.forEach(([_v, runInnerQuery]: any) => {
+            runInnerQuery()
+        })
 
-    // @ts-ignore
-    // const iterator = variableJoinHelperGen(queryContext.variables, queryContext.remapKeys, queryContext.constants)
-    // queryContext.clear()
-    // return iterator
-    return outVar
+        // TODO this seems buggy. Queries should work even if there isn't data available
+        const remapKeysPart = variableParts.map(([v, _runQuery]: any) => fromEntries(v.keys().map((k: any) => [k, k])))
+
+        variableJoinHelper(joinFn, innerVars, remapKeysPart, constantParts)
+    }
+
+    const outMaterializedTable = newMaterializedTable(outVar, runQuery)
+
+    // Run query once
+    outMaterializedTable.runQuery()
+
+    return outMaterializedTable
 }
