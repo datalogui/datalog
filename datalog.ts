@@ -744,7 +744,7 @@ function isEmptyObj(obj: {}) {
     return true;
 }
 
-interface QueryableVariable<T extends {}> extends Tell<T> {
+interface Table<T extends {}> extends Tell<T> {
     (keyMap: Partial<T>): void
     assert(datum: T): void
     recentData(): Array<T> | null
@@ -791,7 +791,7 @@ function isAutoKey(k: string): boolean {
     return k.startsWith('___')
 }
 
-export function newQueryableVariable<T extends {}>(existingVar?: Variable<T>, isDerived?: boolean): QueryableVariable<T> {
+export function newTable<T extends {}>(existingVar?: Variable<T>, isDerived?: boolean): Table<T> {
     const variable = existingVar || new Variable<T>()
     const queryableVariable = (keymap: any) => {
         const constants = fromEntries(Object.entries(keymap).filter(([k, v]: any) => {
@@ -836,10 +836,10 @@ const FreeVarGenerator: any = new Proxy({}, {
     }
 });
 
-export type SchemaOf<V> = V extends QueryableVariable<infer T> ? T : never
+export type SchemaOf<V> = V extends Table<infer T> ? T : never
 
 type QueryFn<Out> = (freeVars: Out) => void
-export function query<Out>(queryFn: QueryFn<Out>): QueryableVariable<Out> {
+export function query<Out>(queryFn: QueryFn<Out>): Table<Out> {
     queryContext = new QueryContext()
     // @ts-ignore – a trick
     queryFn(FreeVarGenerator)
@@ -878,7 +878,7 @@ export function query<Out>(queryFn: QueryFn<Out>): QueryableVariable<Out> {
     })
     console.warn("Variale:", variableParts)
 
-    const outVar = newQueryableVariable()
+    const outVar = newTable()
     // @ts-ignore
     const partRemapKeys = variableParts.map(v => fromEntries(v.keys().map(k => [k, k])))
     // @ts-ignore

@@ -577,8 +577,8 @@ describe("Helpers", () => {
 
 describe("Query", () => {
     test("Hello World join", () => {
-        const A = datalog.newQueryableVariable<{ a: number, b: number }>()
-        const B = datalog.newQueryableVariable<{ b: number, c: number }>()
+        const A = datalog.newTable<{ a: number, b: number }>()
+        const B = datalog.newTable<{ b: number, c: number }>()
         A.assert({ a: 1, b: 2 })
         B.assert({ b: 2, c: 3 })
 
@@ -591,8 +591,8 @@ describe("Query", () => {
 
     test("People Example", () => {
         type ID = number
-        const People = datalog.newQueryableVariable<{ name: string, id: ID }>()
-        const ParentOf = datalog.newQueryableVariable<{ parentID: ID, childID: ID }>()
+        const People = datalog.newTable<{ name: string, id: ID }>()
+        const ParentOf = datalog.newTable<{ parentID: ID, childID: ID }>()
 
         let ids = 0
 
@@ -621,8 +621,8 @@ describe("Query", () => {
 
     test("People Example", () => {
         type ID = number
-        const People = datalog.newQueryableVariable<{ name: string, id: ID }>()
-        const ParentOf = datalog.newQueryableVariable<{ parentID: ID, childID: ID }>()
+        const People = datalog.newTable<{ name: string, id: ID }>()
+        const ParentOf = datalog.newTable<{ parentID: ID, childID: ID }>()
 
         let ids = 0
 
@@ -650,8 +650,8 @@ describe("Query", () => {
 
     test("People Example. Then query result", () => {
         type ID = number
-        const People = datalog.newQueryableVariable<{ name: string, id: ID }>()
-        const ParentOf = datalog.newQueryableVariable<{ parentID: ID, childID: ID }>()
+        const People = datalog.newTable<{ name: string, id: ID }>()
+        const ParentOf = datalog.newTable<{ parentID: ID, childID: ID }>()
 
         let ids = 0
 
@@ -681,10 +681,10 @@ describe("Query", () => {
 
     test("People Example 3 joins", () => {
         type ID = number
-        const People = datalog.newQueryableVariable<{ name: string, id: ID }>()
-        const ParentOf = datalog.newQueryableVariable<{ parentID: ID, childID: ID }>()
-        const A = datalog.newQueryableVariable<{ a: number, b: number }>()
-        const B = datalog.newQueryableVariable<{ b: number, c: number }>()
+        const People = datalog.newTable<{ name: string, id: ID }>()
+        const ParentOf = datalog.newTable<{ parentID: ID, childID: ID }>()
+        const A = datalog.newTable<{ a: number, b: number }>()
+        const B = datalog.newTable<{ b: number, c: number }>()
 
         let ids = 0
 
