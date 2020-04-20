@@ -271,6 +271,12 @@ export class RelationIndex<KName extends string | number | symbol, K, Val> {
         this.keyOrdering = keyOrdering
     }
 
+    clone(): RelationIndex<KName, K, Val> {
+        // @ts-ignore
+        const cloned = new RelationIndex([...this.elements], [...this.keyOrdering])
+        return cloned
+    }
+
     indexBy<NewKName extends keyof Val | KName, NewK extends ValueOf<Val> | K, NewVal extends { [NewKeyName in KName | keyof Val]: ValueOf<Val> | K }>(newkeyOrdering: [NewKName, ...Array<keyof NewVal>]): RelationIndex<NewKName, NewK, NewVal> {
         const keyMapping = this.keyOrdering.reduce((acc: { [key: string]: number }, k, idx) => {
             acc[k as string] = idx
@@ -345,6 +351,12 @@ export class Relation<T> implements MultiIndexRelation<T>, Tell<T> {
         }
 
         return this.relations[0].elements.length
+    }
+
+    clone(): Relation<T> {
+        const cloned = new Relation<T>()
+        cloned.relations = this.relations.map(relation => relation.clone())
+        return cloned
     }
 
     merge(otherRelation: Relation<T>) {
@@ -448,6 +460,14 @@ export class Variable<T> implements Tell<T> {
     recent: Relation<T> = new Relation<T>()
     toAdd: Array<Relation<T>> = []
     _recentChanges: Array<Relation<T>> = []
+
+    clone(): Variable<T> {
+        const cloned = new Variable<T>()
+        clone.stable = this.stable.clone()
+        clone.recent = this.recent.clone()
+        clone.toAdd = this.toAdd.map(toAdd => toAdd.clone())
+        return clone
+    }
 
     keys(): Array<string | number | symbol> {
         if (this.stable.length) {
