@@ -207,7 +207,6 @@ export function filterKeys(keysToKeep: Array<string>, keyOrder: Array<string>) {
 type LeapJoinLogicFn<KVal, SourceVal, Extension> = (sourceRow: [KVal, ...Array<ValueOf<SourceVal>>], extension: Extension) => void
 export function leapJoinHelper<KName extends string | number | symbol, KVal, SourceVal, Extension>(source: RelationIndex<KName, KVal, SourceVal>, leapers: Array<Leaper<[KVal, ...Array<ValueOf<SourceVal>>], Extension>>, logic: LeapJoinLogicFn<KVal, SourceVal, Extension>) {
     if (leapers.length === 0) {
-        console.log("source is", source)
         // @ts-ignore
         source.elements.forEach(row => logic(row, []))
         return
@@ -463,10 +462,10 @@ export class Variable<T> implements Tell<T> {
 
     clone(): Variable<T> {
         const cloned = new Variable<T>()
-        clone.stable = this.stable.clone()
-        clone.recent = this.recent.clone()
-        clone.toAdd = this.toAdd.map(toAdd => toAdd.clone())
-        return clone
+        cloned.stable = this.stable.clone()
+        cloned.recent = this.recent.clone()
+        cloned.toAdd = this.toAdd.map(toAdd => toAdd.clone())
+        return cloned
     }
 
     keys(): Array<string | number | symbol> {
@@ -767,7 +766,7 @@ function isEmptyObj(obj: {}) {
 interface Table<T extends {}> extends Tell<T> {
     (keyMap: Partial<T>): void
     assert(datum: T): void
-    recentData(): Array<T> | null
+    view(): Variable<T>
 }
 
 
@@ -813,7 +812,7 @@ function isAutoKey(k: string): boolean {
 
 export function newTable<T extends {}>(existingVar?: Variable<T>, isDerived?: boolean): Table<T> {
     const variable = existingVar || new Variable<T>()
-    const queryableVariable = (keymap: any) => {
+    const table = (keymap: any) => {
         const constants = fromEntries(Object.entries(keymap).filter(([k, v]: any) => {
             if (typeof v === 'object' && v && 'ns' in v && v.ns === FreeVarNS) {
                 return false
@@ -837,16 +836,19 @@ export function newTable<T extends {}>(existingVar?: Variable<T>, isDerived?: bo
 
         queryContext.addVariable(variable, remapKeys, constants)
     }
-    queryableVariable._innerVar = variable
+    table._innerVar = variable
 
     if (!isDerived) {
-        queryableVariable.assert = (args: T) => variable.assert(args)
+        table.assert = (args: T) => variable.assert(args)
     }
 
-    queryableVariable.recentData = () => variable.recentData()
+    // table.clone = () => variable.clone()
+    table.view = () => variable.clone()
+
+
     // queryableVariable.changed = variable.changed
 
-    return queryableVariable
+    return table
 }
 
 const FreeVarNS = Symbol("FreeVariable")
@@ -896,7 +898,6 @@ export function query<Out>(queryFn: QueryFn<Out>): Table<Out> {
         variableJoinHelper((join) => { outVar.assert(join) }, variables, remapKeys, constants)
         return outVar
     })
-    console.warn("Variale:", variableParts)
 
     const outVar = newTable()
     // @ts-ignore
@@ -919,30 +920,4 @@ export function query<Out>(queryFn: QueryFn<Out>): Table<Out> {
     // queryContext.clear()
     // return iterator
     return outVar
-}
-
-// Transform those into two lists [[[A, {a: 'a', b: 'b'}]], [[B, {c: 'c'}]]]
-type ThingToJoin<R = any, KeyMap = { [key: string]: string }> = [R, KeyMap]
-type Part = Array<ThingToJoin>
-type Parts = Array<Part>
-export function* recursiveForLoopJoin<Out = any>(parts: Parts, joinResultSoFar: any, remapKeysFn: (rel: any, keyMap: { [key: string]: string }) => any, joiner: (...relations: Array<any>) => Generator<any>): Generator<Out> {
-    const [head, ...tail] = parts
-    if (head !== undefined) {
-        // TODO figure out if we need to remapKeys
-        for (let out of joiner(...head.map(([r, keyMap]) => {
-            if (isIdentityKeyMap(keyMap)) {
-                return r
-            }
-            return remapKeysFn(r, keyMap)
-        }))) {
-            let nextJoinResultSoFar = { ...out, ...joinResultSoFar }
-            if (tail.length > 0) {
-                yield* recursiveForLoopJoin(tail, nextJoinResultSoFar, remapKeysFn, joiner)
-            } else {
-                yield nextJoinResultSoFar
-            }
-        }
-    } else {
-        throw new Error("recursiveForLoopJoin Errored. Shouldn't happen!")
-    }
 }

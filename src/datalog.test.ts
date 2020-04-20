@@ -325,7 +325,6 @@ describe("Variables", () => {
 
         A.assert({ a: 1, b: 2 })
         out = [...datalog.variableJoinHelperGen([A], [{ a: 'a', b: 'b' }], [{}])]
-        console.log('out is', out)
         expect(out).toEqual([{ a: 1, b: 2 }])
     })
 
@@ -537,33 +536,6 @@ describe("recursiveForLoopJoin", () => {
     test("Mock remap keys works", () => {
         expect(mockRemapKeys(A, { a: 'a2', b: 'b' })).toEqual([{ a2: 1, b: 2 }])
     })
-
-    test("joins 1 part", () => {
-        const parts: Array<Array<[any, { [key: string]: string }]>> = [
-            [[A, { a: 'a', b: 'b' }], [B, { b: 'b', c: 'c' }]]
-        ]
-        const it = datalog.recursiveForLoopJoin(parts, {}, mockRemapKeys, mockJoiner)
-        expect([...it]).toEqual([{ a: 1, b: 2, c: 3 }])
-    })
-
-    test("joins 2 part", () => {
-        const parts: Array<Array<[any, { [key: string]: string }]>> = [
-            [[A, { a: 'a', b: 'b' }]], [[B, { b: 'b2', c: 'c' }]]
-        ]
-
-        const it = datalog.recursiveForLoopJoin(parts, {}, mockRemapKeys, mockJoiner)
-        expect([...it]).toEqual([{ a: 1, b: 2, b2: 2, c: 3 }])
-    })
-
-    test("Joins twice, then one more time", () => {
-        const parts: Array<Array<[any, { [key: string]: string }]>> = [
-            [[A, { a: 'a', b: 'b' }], [B, { b: 'b', c: 'c' }]],
-            [[B, { b: 'b2', c: 'c2' }]]
-        ]
-
-        const it = datalog.recursiveForLoopJoin(parts, {}, mockRemapKeys, mockJoiner)
-        expect([...it]).toEqual([{ a: 1, b: 2, b2: 2, c: 3, c2: 3 }])
-    })
 })
 
 describe("Helpers", () => {
@@ -587,7 +559,7 @@ describe("Query", () => {
             A({ a, b })
             B({ b, c })
         })
-        expect([...queryResult.recentData()]).toEqual([{ a: 1, b: 2, c: 3 }])
+        expect([...queryResult.view().recentData()]).toEqual([{ a: 1, b: 2, c: 3 }])
     })
 
     test("People Example", () => {
@@ -617,7 +589,7 @@ describe("Query", () => {
             People({ id: parentID, name: parentName })
         })
 
-        expect([...queryResult.recentData()]).toEqual([{ parentID: 1, parentName: "FooDad" }, { parentID: 2, parentName: "FooMom" }, { parentID: 4, parentName: "BarDad" }, { parentID: 5, parentName: "BarMom" }])
+        expect([...queryResult.view().recentData()]).toEqual([{ parentID: 1, parentName: "FooDad" }, { parentID: 2, parentName: "FooMom" }, { parentID: 4, parentName: "BarDad" }, { parentID: 5, parentName: "BarMom" }])
     })
 
     test("People Example", () => {
@@ -646,7 +618,7 @@ describe("Query", () => {
         // where child.name = 'FooChild' and child.id = childID and parent.id = parentID
 
 
-        expect([...queryResult.recentData()]).toEqual([{ parentID: 1, parentName: "FooDad", childID: 0 }, { parentID: 2, parentName: "FooMom", childID: 0 }])
+        expect([...queryResult.view().recentData()]).toEqual([{ parentID: 1, parentName: "FooDad", childID: 0 }, { parentID: 2, parentName: "FooMom", childID: 0 }])
     })
 
     test("People Example. Then query result", () => {
@@ -670,14 +642,11 @@ describe("Query", () => {
             People({ id: parentID, name: parentName })
         })
 
-        console.log("Query result is", QueryResult)
-
         let QueryResult2 = datalog.query(({ parentID }: { parentID: number }) => {
             QueryResult({ parentName: "FooMom", parentID })
         })
-        console.log("Query result 2 is", QueryResult2)
 
-        expect([...QueryResult2.recentData()]).toEqual([{ parentID: 2 }])
+        expect([...QueryResult2.view().recentData()]).toEqual([{ parentID: 2 }])
     })
 
     test("People Example 3 joins", () => {
