@@ -1,0 +1,14 @@
+# .gitlab-ci.yml
+image: node:12.16.2
+
+before_script:
+  - yarn install --frozen-lockfile
+
+test:
+  stage: test
+  script: yarn jest --ci
+  cache:
+    paths:
+    - node_modules/
+    - .yarn
+
