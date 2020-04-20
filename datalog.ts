@@ -747,6 +747,7 @@ function isEmptyObj(obj: {}) {
 interface QueryableVariable<T extends {}> extends Tell<T> {
     (keyMap: Partial<T>): void
     assert(datum: T): void
+    recentData(): Array<T> | null
 }
 
 
@@ -822,10 +823,10 @@ export function newQueryableVariable<T extends {}>(existingVar?: Variable<T>, is
         queryableVariable.assert = (args: T) => variable.assert(args)
     }
 
-    queryableVariable.recentData = variable.recentData
+    queryableVariable.recentData = () => variable.recentData()
+    // queryableVariable.changed = variable.changed
 
     return queryableVariable
-
 }
 
 const FreeVarNS = Symbol("FreeVariable")
