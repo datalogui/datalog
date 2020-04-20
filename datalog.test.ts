@@ -648,6 +648,37 @@ describe("Query", () => {
         expect([...queryResult.recentData()]).toEqual([{ parentID: 1, parentName: "FooDad", childID: 0 }, { parentID: 2, parentName: "FooMom", childID: 0 }])
     })
 
+    test("People Example. Then query result", () => {
+        type ID = number
+        const People = datalog.newQueryableVariable<{ name: string, id: ID }>()
+        const ParentOf = datalog.newQueryableVariable<{ parentID: ID, childID: ID }>()
+
+        let ids = 0
+
+        People.assert({ name: "FooChild", id: ids++ })
+        People.assert({ name: "FooDad", id: ids++ })
+        People.assert({ name: "FooMom", id: ids++ })
+
+        ParentOf.assert({ parentID: 1, childID: 0 }) // 1 = FooDad, 0 = FooChild
+        ParentOf.assert({ parentID: 2, childID: 0 }) // 1 = FooMom, 0 = FooChild
+
+        // Who's FooChild's parent?
+        let QueryResult = datalog.query<{ parentName: string, parentID: number }>(({ parentName, childID, parentID }: any) => {
+            People({ name: "FooChild", id: childID })
+            ParentOf({ childID, parentID })
+            People({ id: parentID, name: parentName })
+        })
+
+        console.log("Query result is", QueryResult)
+
+        let QueryResult2 = datalog.query(({ parentID }: { parentID: number }) => {
+            QueryResult({ parentName: "FooMom", parentID })
+        })
+        console.log("Query result 2 is", QueryResult2)
+
+        expect([...QueryResult2.recentData()]).toEqual([{ parentID: 2 }])
+    })
+
     test("People Example 3 joins", () => {
         type ID = number
         const People = datalog.newQueryableVariable<{ name: string, id: ID }>()

@@ -835,8 +835,10 @@ const FreeVarGenerator: any = new Proxy({}, {
     }
 });
 
+export type SchemaOf<V> = V extends QueryableVariable<infer T> ? T : never
+
 type QueryFn<Out> = (freeVars: Out) => void
-export function query<Out>(queryFn: QueryFn<Out>): Variable<Out> {
+export function query<Out>(queryFn: QueryFn<Out>): QueryableVariable<Out> {
     queryContext = new QueryContext()
     // @ts-ignore – a trick
     queryFn(FreeVarGenerator)
@@ -867,6 +869,7 @@ export function query<Out>(queryFn: QueryFn<Out>): Variable<Out> {
         }
     })
 
+    // @ts-ignore
     const variableParts = parts.map(([variables, remapKeys, constants]) => {
         const outVar = new Variable()
         variableJoinHelper((join) => { outVar.assert(join) }, variables, remapKeys, constants)
@@ -874,10 +877,16 @@ export function query<Out>(queryFn: QueryFn<Out>): Variable<Out> {
     })
     console.warn("Variale:", variableParts)
 
-    const outVar = new Variable()
+    const outVar = newQueryableVariable()
+    // @ts-ignore
     const partRemapKeys = variableParts.map(v => fromEntries(v.keys().map(k => [k, k])))
+    // @ts-ignore
     variableJoinHelper((join) => { outVar.assert(join) }, variableParts, partRemapKeys, variableParts.map(() => { }))
     variableParts
+
+    // Remove the ability to assert
+    // @ts-ignore
+    outVar.assert = undefined
 
     // while (outVar.changed()) { }
     // console.log("Variable Parts", variableParts.map(p => p.stable.relations[0].elements))
