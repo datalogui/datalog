@@ -201,6 +201,61 @@ describe('Relation', () => {
         expect(DataFrog.sortTuple([datalog.Unconstrained, 1], [2, 1])).toEqual(0)
     })
 
+    test.only('Test AntiExtendWithUnconstrained', () => {
+        const A = new datalog.RelationIndex<"a", number, { b: number }>([], ["a", "b"])
+        const B = new datalog.RelationIndex<"b", number, { c: number }>([], ["b", "c"])
+        const C = new datalog.RelationIndex<"a", number, { c: number }>([], ["a", "c"])
+        const Cneg = new datalog.RelationIndex<"a", number, { c: number }>([], ["a", "c"])
+
+        A.assert({ a: 1, b: 2 })
+        B.assert({ b: 2, c: 3 })
+        B.assert({ b: 2, c: 4 })
+        C.assert({ a: 1, c: 3 })
+        C.assert({ a: 1, c: 4 })
+        Cneg.assert({ a: 1, c: 3 })
+
+        // Cneg.assert({ a: 1, c: 3 })
+
+        // const BLeaper = new datalog.ExtendWithUnconstrained(
+        //     ([_a, b]: [number, number]) => b,
+        //     ["c", "d"],
+        //     B
+        // )
+        // expect(BLeaper.outputTupleFunc([3])).toEqual([3, datalog.Unconstrained])
+
+        const out: Array<[number, number, ...(number | symbol)[]]> = []
+
+        datalog.leapJoinHelper(A, [
+            new datalog.ExtendWithUnconstrained(
+                ([_a, b]) => [b],
+                1,
+                ["c"],
+                B,
+                ["b", "c"]
+            ),
+            new datalog.ExtendWithUnconstrained(
+                ([a, _b]) => [a],
+                1,
+                ["c"],
+                C,
+                ["a", "c"]
+            ),
+            new datalog.ExtendWithUnconstrained(
+                ([a, _b]) => [a],
+                1,
+                ["c"],
+                Cneg,
+                ["a", "c"],
+                true
+            ),
+        ], ([a, b], rest) => {
+            out.push([a, b, ...rest])
+        })
+        expect(out).toEqual([[1, 2, 4]])
+
+        expect(DataFrog.sortTuple([datalog.Unconstrained, 1], [2, 1])).toEqual(0)
+    })
+
     test('Filter out missing keys', () => {
         // Say relation B has keys ['c', 'b']
         // and our output tuple key order is ['a', 'b', 'c', 'd']

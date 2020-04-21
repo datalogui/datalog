@@ -74,14 +74,16 @@ export class ExtendWithUnconstrained<P, KName extends string | number | symbol, 
     outputKeys: OutputKeys
     relation: RelationIndex<KName, K, Val>
     outputTupleFunc: (relationVals: Tupleized<Val>) => TupleizedUnconstrained<Val>
+    isAnti: boolean
 
     startIdx: number = 0
     endIdx: number = 0
 
-    constructor(keyFunc: (P: P) => Array<any>, keyLength: number, outputKeys: OutputKeys, relation: RelationIndex<KName, K, Val>, relationKeyOrder: any) {
+    constructor(keyFunc: (P: P) => Array<any>, keyLength: number, outputKeys: OutputKeys, relation: RelationIndex<KName, K, Val>, relationKeyOrder: any, isAnti: boolean = false) {
         this.keyFunc = keyFunc
         this.outputKeys = outputKeys
         this.relation = relation
+        this.isAnti = isAnti
         const myKs = relationKeyOrder.slice(keyLength)
         const mapping = myKs.reduce((acc: { [key: number]: number }, k: any, i: number) => {
             acc[i] = outputKeys.indexOf(k)
@@ -107,10 +109,16 @@ export class ExtendWithUnconstrained<P, KName extends string | number | symbol, 
         // Nothing found
         if (this.startIdx === this.relation.elements.length) {
             this.endIdx = this.startIdx
+            if (this.isAnti) {
+                return Infinity
+            }
             return 0
         }
 
         this.endIdx = DataFrog.gallop(this.relation.elements, (row: any) => DataFrog.sortTuple(row.slice(0, key.length), key) === 0, this.startIdx)
+        if (this.isAnti) {
+            return Infinity
+        }
         return this.endIdx - this.startIdx
     }
 
@@ -135,6 +143,10 @@ export class ExtendWithUnconstrained<P, KName extends string | number | symbol, 
 
             // No more results for this val
             if (ordResult > 0) {
+                if (this.isAnti) {
+                    out.push(val)
+                }
+
                 valIndex++
                 continue
             }
@@ -150,13 +162,12 @@ export class ExtendWithUnconstrained<P, KName extends string | number | symbol, 
             startIdx++
 
             // @ts-ignore
-            // const output = this.outputTupleFunc(this.relation.elements[startIdx]?.slice(keyLen))
-            // const hasMatch = DataFrog.sortTuple(output, val) === 0
             if (DEBUG_LEVEL > 0) {
                 console.log("Comparing my output:", output, "val", val, this.relation, hasMatch)
             }
 
-            if (hasMatch) {
+            // If this is anti, we don't add it
+            if (hasMatch && !this.isAnti) {
                 // Check for unconstrained
                 let filledInUnconstrained: null | TupleizedUnconstrained<Val> = null
                 val.forEach((column, i) => {
@@ -175,6 +186,13 @@ export class ExtendWithUnconstrained<P, KName extends string | number | symbol, 
                 out.push(val)
             }
             valIndex++
+        }
+
+        // If it's an anti query then add the rest of the vals because we add what didn't match.
+        if (this.isAnti) {
+            for (let index = valIndex; index < vals.length; index++) {
+                out.push(vals[index])
+            }
         }
 
         return out
