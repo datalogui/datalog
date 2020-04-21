@@ -18,53 +18,6 @@ interface Leaper<P, V> {
     intersect: (prefix: P, vals: Array<V>) => Array<V>
 }
 
-class ExtendWith<P, KName extends string | number | symbol, K, Val> implements Leaper<P, Tupleized<Val>> {
-    keyFunc: (P: P) => K
-    relation: RelationIndex<KName, K, Val>
-
-    startIdx: number = 0
-    endIdx: number = 0
-
-    constructor(keyFunc: (P: P) => K, relation: RelationIndex<KName, K, Val>) {
-        this.keyFunc = keyFunc
-        this.relation = relation
-    }
-
-    count(prefix: P): number {
-        const key = this.keyFunc(prefix)
-        this.startIdx = DataFrog.gallop(this.relation.elements, (row: any) => DataFrog.sortTuple(row[0], key) === -1
-        )
-        // Nothing found
-        if (this.startIdx === this.relation.elements.length) {
-            this.endIdx = this.startIdx
-            return 0
-        }
-
-        this.endIdx = DataFrog.gallop(this.relation.elements, (row: any) => DataFrog.sortTuple(row[0], key) === 0, this.startIdx)
-        return this.endIdx - this.startIdx
-    }
-
-    propose(prefix: P): Array<Tupleized<Val>> {
-        return this.relation.elements.slice(this.startIdx, this.endIdx).map(([_, ...rest]) => rest)
-    }
-
-    // Could be faster if we mutate vals
-    intersect(prefix: P, vals: Array<Tupleized<Val>>): Array<Tupleized<Val>> {
-        const key = this.keyFunc(prefix)
-        let startIdx = this.startIdx;
-        return vals.filter(val => {
-            startIdx = DataFrog.gallop(this.relation.elements, ([_, ...rest]: any) => {
-                return DataFrog.sortTuple(rest, val) === -1
-            }, startIdx)
-            if (startIdx >= this.relation.elements.length) {
-                return false
-            }
-
-            return DataFrog.sortTuple(this.relation.elements[startIdx]?.slice(1), val) === 0
-        })
-    }
-}
-
 export const Unconstrained = DataFrog.Unconstrained as symbol
 
 type OutputKeys = Array<string | number | symbol>
@@ -406,10 +359,6 @@ export class RelationIndex<KName extends string | number | symbol, K, Val> {
             }
         }
         this.elements.splice(insertIdx, 0, newRow)
-    }
-
-    extendWith<P>(keyFunc: (prefix: P) => K): ExtendWith<P, KName, K, Val> {
-        return new ExtendWith(keyFunc, this)
     }
 }
 
@@ -937,22 +886,11 @@ export function innerVariableJoinHelper(logicFn: (source: any, isRetraction: boo
     }
 }
 
-function isIdentityKeyMap(keyMap: { [key: string]: string }): boolean {
-    return Object.entries(keyMap).every(([k, v]) => k === v)
-}
-
-function variableJoinIntoVariable(outVar: Variable<any>, variables: Array<any>, remapKeyMetas: Array<any>, constants: Array<any>, stableOnly: boolean) {
-    // @ts-ignore
-    for (const outDatum of variableJoinHelperGen(variables, remapKeys, constants)) {
-        outVar.assert(outDatum)
-    }
-}
-
-export function* crossJoinVariables(variables: Array<any>) {
-    // yield* variableJoinHelperGen(variables as any, variables.map(v => fromEntries(v.keys().map((k) => [k, k]))) as any, [])
-}
-
 function isEmptyObj(obj: {}) {
+    if (obj === EmptyObj) {
+        return true
+    }
+
     for (var prop in obj) {
         if (obj.hasOwnProperty(prop)) {
             return false;

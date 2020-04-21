@@ -9,18 +9,6 @@ function intoAddedDatums<T>(v: Array<T>): Array<datalog.RecentDatum<T>> {
 
 type PersonID = number
 
-// describe('Free Variable', () => {
-//     test('Constrains', () => {
-//         // { id: PersonID, name: String}
-//         const person = datalog.Relation<{ id: PersonID, name: string }>()
-//         const v = new datalog.FreeVariable()
-//         v.constrain([1, 2, 3, 4])
-//         expect(v.availableValues).toStrictEqual([1, 2, 3, 4]);
-//         v.constrain([2, 3])
-//         expect(v.availableValues).toStrictEqual([2, 3]);
-//     });
-// })
-
 describe.skip("Playground", () => {
     test("Generators", () => {
         console.log('here')
@@ -42,12 +30,6 @@ describe.skip("Playground", () => {
 })
 
 describe('Relation', () => {
-    // test('Returns a function', () => {
-    // { id: PersonID, name: String}
-    // const person = datalog.Relation<{ id: PersonID, name: string }>()
-
-    // expect(typeof person).toBe("function");
-    // });
     const newPerson = () => new datalog.RelationIndex<"id", PersonID, { name: string }>([], ["id", "name"])
 
     test('Inserts something in the correct place', () => {
@@ -78,69 +60,6 @@ describe('Relation', () => {
         const B = A.indexBy(['b', 'a'])
         expect(B.elements).toEqual([[2, 1]])
     })
-
-    test('ExtendWith & Leaper works', () => {
-        // { id: PersonID, name: String}
-        const person = newPerson()
-        person.assert({ id: 0, name: "marco" })
-        person.assert({ id: 1, name: "daiyi" })
-        person.assert({ id: 2, name: "beba" })
-
-        const personExtendedWith = person.extendWith(([id]: [PersonID]) => id);
-        expect(personExtendedWith.count([0])).toEqual(1)
-        // expect(personExtendedWith.propose([0])).toEqual([["marco"]])
-        // expect(personExtendedWith.intersect([0], [["marcopolo"], ["marco"]])).toEqual([["marco"]])
-    });
-
-    test('ExtendWith & Leaper works', () => {
-        // { id: PersonID, name: String}
-        const person = newPerson()
-        person.assert({ id: 0, name: "marco" })
-        person.assert({ id: 0, name: "foo" })
-
-        const personExtendedWith = person.extendWith(([id]: [PersonID]) => id);
-        expect(personExtendedWith.count([0])).toEqual(2)
-    });
-
-    test('LeapJoin', () => {
-        // { id: PersonID, name: String}
-        const A = new datalog.RelationIndex<"a", number, { b: number }>([], ["a", "b"])
-        const B = new datalog.RelationIndex<"b", number, { c: number }>([], ["b", "c"])
-        const C = new datalog.RelationIndex<"a", number, { c: number }>([], ["a", "c"])
-
-        A.assert({ a: 1, b: 2 })
-        B.assert({ b: 2, c: 3 })
-        B.assert({ b: 2, c: 4 })
-        C.assert({ a: 1, c: 3 })
-
-        const out: Array<[number, number, number]> = []
-        datalog.leapJoinHelper(A, [B.extendWith(([_, b]) => b), C.extendWith(([a, _]) => a)], ([a, b], [c]) => {
-            out.push([a, b, c])
-
-        })
-        expect(out).toEqual([[1, 2, 3]])
-    });
-
-    test('LeapJoin2', () => {
-        // { id: PersonID, name: String}
-        const A = new datalog.RelationIndex<"a", number, { b: number }>([], ["a", "b"])
-        const B = new datalog.RelationIndex<"b", number, { c: number }>([], ["b", "c"])
-        const C = new datalog.RelationIndex<"a", number, { c: number }>([], ["a", "c"])
-
-        A.assert({ a: 1, b: 2 })
-        B.assert({ b: 2, c: 3 })
-        B.assert({ b: 2, c: 4 })
-        C.assert({ a: 1, c: 3 })
-        C.assert({ a: 1, c: 4 })
-
-        const out: Array<[number, number, number]> = []
-        datalog.leapJoinHelper(A, [B.extendWith(([_, b]) => b), C.extendWith(([a, _]) => a)], ([a, b], [c]) => {
-            out.push([a, b, c])
-
-        })
-
-        expect(out).toEqual([[1, 2, 3], [1, 2, 4]])
-    });
 
     test("join key ordering", () => {
         const out = datalog.joinKeyOrdering([
@@ -523,19 +442,6 @@ describe("Variables", () => {
             }
         ])
     })
-
-    test.skip("Cross Product Variable Join (no common keys)", () => {
-        const A = new datalog.Variable<{ a: number, b: number }>()
-        const B = new datalog.Variable<{ c: number }>()
-
-        A.assert({ a: 1, b: 2 })
-        B.assert({ c: 3 })
-        B.assert({ c: 4 })
-
-        let out: Array<{ a: number, b: number, c: number }> = [...datalog.crossJoinVariables([A, B])]
-        expect(out).toEqual([{ a: 1, b: 2, c: 3 }, { a: 1, b: 2, c: 4 }])
-    })
-
 })
 
 describe("recursiveForLoopJoin", () => {
