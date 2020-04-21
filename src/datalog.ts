@@ -907,7 +907,7 @@ interface AntiQueryable<T extends {}> {
     not(keyMap: Partial<T>): void
 }
 
-interface TableView<T extends {}> {
+export interface TableView<T extends {}> {
     recentData(): null | Array<RecentDatum<T>>
 }
 
@@ -915,10 +915,10 @@ interface Viewable<T extends {}> {
     view(): TableView<T>
 }
 
-interface Table<T extends {}> extends Tell<T>, Retract<T>, Queryable<T>, AntiQueryable<T>, Viewable<T> {
+export interface Table<T extends {}> extends Tell<T>, Retract<T>, Queryable<T>, AntiQueryable<T>, Viewable<T> {
 }
 
-interface MaterializedTable<T extends {}> extends Queryable<T>, AntiQueryable<T>, Viewable<T> {
+export interface MaterializedTable<T extends {}> extends Queryable<T>, AntiQueryable<T>, Viewable<T> {
     runQuery: () => void
 }
 

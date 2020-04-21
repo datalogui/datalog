@@ -287,7 +287,7 @@ function joinInto(inputVariableA, inputVariableB, outputVariable, logicFn) {
   outputVariable.insert(new Relation(results));
 }
 
-export const Unconstrained = Symbol('Unconstrained')
+const Unconstrained = Symbol('Unconstrained')
 
 module.exports = {
   Relation,
