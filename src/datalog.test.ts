@@ -772,7 +772,6 @@ describe("Query", () => {
         const QueryResult2 = datalog.query<{ childID: number, parentID: number, parentName: string }>(({ childID, parentID, parentName }) => {
             QueryResult({ childID })
             ParentOf({ childID, parentID })
-            // TODO it would be cool to use a not here. To not have Foo Mom appear
             People({ id: parentID, name: parentName })
         })
 

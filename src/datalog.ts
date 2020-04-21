@@ -418,8 +418,6 @@ export class Relation<T> implements MultiIndexRelation<T>, Tell<T> {
     }
 
     createInitialRelation(datum: T) {
-        // const ks = Object.keys(datum)
-        // const vals = ks.map(k => datum[k])
         const entries = Object.entries(datum)
         const ks = entries.map(([k]) => k)
         const vals = entries.map(([, val]) => val)
@@ -723,23 +721,18 @@ export function innerVariableJoinHelper(logicFn: (source: any) => void, variable
     }
 
     // TODO order keys by remapKeyMetas
-    // const srckeyOrder = remapKeys(variables[0].keys(), remapKeyMetas[0])
     const srckeyOrder: Array<string> = Object.values(remapKeyMetas[0])
 
-    // const fullOutputKeyOrder = joinKeyOrdering(variables.map((v, i) => remapKeys(v.keys(), remapKeyMetas[i]) as any))
     const fullOutputKeyOrder = joinKeyOrdering(variables.map((_, i) => Object.values(remapKeyMetas[i])))
 
     const outputKeyOrder = fullOutputKeyOrder.slice(srckeyOrder.length)
-    // const restKeyOrders = variables.slice(1).map((variable, i) => {
     const restKeyOrders = remapKeyMetas.slice(1).map((remapKeyMeta, i) => {
         // @ts-ignore
-        // const indexByKeyOrder = filterKeys(remapKeys(variable.keys(), remapKeyMetas[i + 1]), fullOutputKeyOrder)
         const indexByKeyOrder = filterKeys(Object.values(remapKeyMeta), fullOutputKeyOrder)
         return indexByKeyOrder
     })
 
     const restKeyOrderSets = restKeyOrders.map(keyOrder => new Set(keyOrder))
-    // const restKeyLengths = restKeyOrderSet.map(s => srcK)
     const restkeyLengths = restKeyOrderSets.map(keyOrderSet => srckeyOrder.filter(k => keyOrderSet.has(k)).length)
 
     let totalIterations = (2 ** variables.length) - 1 // minus 1 since we don't need to check the final state of all stable
@@ -771,9 +764,7 @@ export function innerVariableJoinHelper(logicFn: (source: any) => void, variable
                 let indexedRelation = relation.indexBy(reverseRemapKeys(relationKeyOrder, remapKeyMetas[index]))
                 // Filter the relation with known constants. Could make joins faster
                 if (constants[index] !== undefined && constants[index] !== EmptyObj) {
-                    // console.log("Prefiltered indexedRelation:", indexedRelation, relation)
                     indexedRelation = indexedRelation.filterElements(constants[index])
-                    // console.log("Filtered indexedRelation", indexedRelation)
                 }
 
                 // @ts-ignore
@@ -1007,7 +998,6 @@ export function query<Out>(queryFn: QueryFn<Out>): MaterializedTable<Out> {
         cloned.meta.isAnti = queryContext.antiVariablesIndices.has(i)
         return cloned
     })
-    // console.log("Source keys are", queryContext)
     queryContext.remapKeys.forEach((remapKeys, i) => {
         if (i === 0) {
             return parts[0] = [[queryVariables[0]], [remapKeys], [queryContext.constants[0]]]
@@ -1038,7 +1028,6 @@ export function query<Out>(queryFn: QueryFn<Out>): MaterializedTable<Out> {
         return [outVar, runInnerQuery]
     })
 
-    // const outVar: MaterializedTable<Out> = newTable<Out>(undefined, true)
     const outVar = new Variable<Out>()
     // @ts-ignore
     const joinFn = (join) => { outVar.assert(join) }
