@@ -134,12 +134,26 @@ export class ExtendWithUnconstrained<P, KName extends string | number | symbol, 
         return count
     }
 
+    isRetraction(tuple: any): boolean {
+        return hasRetractionMeta(tuple)
+    }
+
+    _reshape<T>(tuple: Tupleized<Val>, keyLen: number) {
+        const outputTuple = this.outputTupleFunc(tuple.slice(keyLen) as any)
+        if (this.isRetraction(tuple)) {
+            // @ts-ignore
+            outputTuple[MetaSymbol] = { isRetraction: true }
+        }
+        return outputTuple
+    }
+
     propose(prefix: P): Array<TupleizedUnconstrained<Val>> {
         const keyLen = this.keyFunc(prefix).length
         if (this.isAnti) {
             throw new Error("Anti's shouldn't propose")
         }
-        return this.relation.elements.slice(this.startIdx, this.endIdx).map((tuple) => this.outputTupleFunc(tuple.slice(keyLen) as any))
+        // console.log("In propose", this.relation.elements[0])
+        return this.relation.elements.slice(this.startIdx, this.endIdx).map((tuple) => this._reshape(tuple as any, keyLen))
     }
 
     // Could be faster if we mutate vals
@@ -150,7 +164,7 @@ export class ExtendWithUnconstrained<P, KName extends string | number | symbol, 
             console.log("output key is", this.outputKeys)
             console.log("Vals is", vals)
             // @ts-ignore
-            console.log("My elements are", this.relation.elements.map(e => this.outputTupleFunc(e.slice(keyLen))))
+            console.log("My elements are", this.relation.elements.map(e => this._reshape(e, keyLen)))
             console.log("My start/end", this.startIdx, this.endIdx)
         }
         let startIdx = this.startIdx;
@@ -161,7 +175,7 @@ export class ExtendWithUnconstrained<P, KName extends string | number | symbol, 
             const val = vals[valIndex]
 
             // @ts-ignore
-            const output = this.outputTupleFunc(this.relation.elements[startIdx]?.slice(keyLen))
+            const output = this._reshape(this.relation.elements[startIdx], keyLen)
             const ordResult = DataFrog.sortTuple(output, val)
 
             // No more results for this val
@@ -177,7 +191,7 @@ export class ExtendWithUnconstrained<P, KName extends string | number | symbol, 
             const hasMatch = ordResult === 0
             if (!hasMatch) {
                 startIdx = DataFrog.gallop(this.relation.elements, (tuple: any) => {
-                    const output = this.outputTupleFunc(tuple.slice(keyLen))
+                    const output = this._reshape(tuple, keyLen)
                     return DataFrog.sortTuple(output, val) === -1
                 }, startIdx)
                 continue
@@ -249,11 +263,14 @@ export function filterKeys(keysToKeep: Array<string>, keyOrder: Array<string>) {
     return keyOrder.filter(k => set.has(k))
 }
 
-type LeapJoinLogicFn<KVal, SourceVal, Extension> = (sourceRow: [KVal, ...Array<ValueOf<SourceVal>>], extension: Extension) => void
+type LeapJoinLogicFn<KVal, SourceVal, Extension> = (sourceRow: [KVal, ...Array<ValueOf<SourceVal>>], extension: Extension, isRetraction: boolean) => void
 export function leapJoinHelper<KName extends string | number | symbol, KVal, SourceVal, Extension>(source: RelationIndex<KName, KVal, SourceVal>, leapers: Array<Leaper<[KVal, ...Array<ValueOf<SourceVal>>], Extension>>, logic: LeapJoinLogicFn<KVal, SourceVal, Extension>) {
     if (leapers.length === 0) {
-        // @ts-ignore
-        source.elements.forEach(row => logic(row, []))
+        source.elements.forEach(row => {
+            const rowIsRetraction = hasRetractionMeta(row)
+            // @ts-ignore
+            logic(row, [], rowIsRetraction)
+        })
         return
     }
     for (const row of source.elements) {
@@ -296,13 +313,23 @@ export function leapJoinHelper<KName extends string | number | symbol, KVal, Sou
                 }
             }
 
+            // @ts-ignore
+            const rowIsRetraction = hasRetractionMeta(row)
             // 4. Call `logic` on each value
             for (const val of vals) {
-                logic(row, val)
+                // @ts-ignore
+                const valIsRetraction = hasRetractionMeta(val)
+                logic(row, val, rowIsRetraction || valIsRetraction || false)
             }
         }
 
     }
+}
+
+const MetaSymbol: symbol = Symbol('meta')
+
+function hasRetractionMeta(v: any): boolean {
+    return !!v[MetaSymbol]?.isRetraction
 }
 
 export class RelationIndex<KName extends string | number | symbol, K, Val> {
@@ -359,8 +386,25 @@ export class RelationIndex<KName extends string | number | symbol, K, Val> {
         this.insertRow(this.keyOrdering.map(k => element[k]))
     }
 
-    insertRow(newRow: [K, ...Array<ValueOf<Val>>]) {
+    retract(element: { [KeyName in KName]: K } & Val) {
+        // @ts-ignore
+        const newRow = this.keyOrdering.map(k => element[k])
+        newRow[MetaSymbol] = { isRetraction: true }
+        this.insertRow(newRow, true)
+    }
+
+    insertRow(newRow: [K, ...Array<ValueOf<Val>>], isRetraction: boolean = false) {
         const insertIdx = DataFrog.gallop(this.elements, (row: any) => DataFrog.sortTuple(row, newRow) === -1)
+        // Check if this is a retraction and if we have a matching datum to retract.
+        // If so, we will remove the positive match and clear the slate.
+        if (isRetraction) {
+            const nextDatum = this.elements[insertIdx]
+            if (nextDatum && !hasRetractionMeta(nextDatum) && DataFrog.sortTuple(nextDatum, newRow) === 0) {
+                // We have a match, remove nextDatum from our elements
+                this.elements.splice(insertIdx, 1)
+                return
+            }
+        }
         this.elements.splice(insertIdx, 0, newRow)
     }
 
@@ -372,7 +416,9 @@ export class RelationIndex<KName extends string | number | symbol, K, Val> {
 
 interface Tell<Val> {
     assert: (v: Val) => void
-    // retract: (v: Val) => void
+}
+interface Retract<Val> {
+    retract: (v: Val) => void
 }
 
 interface MultiIndexRelation<T> {
@@ -383,7 +429,7 @@ interface MultiIndexRelation<T> {
 }
 
 
-export class Relation<T> implements MultiIndexRelation<T>, Tell<T> {
+export class Relation<T> implements MultiIndexRelation<T>, Tell<T>, Retract<T> {
     relations: Array<RelationIndex<keyof T, ValueOf<T>, { [K in keyof T]: T[K] }>> = []
     constructor() {
         this.relations = []
@@ -408,19 +454,28 @@ export class Relation<T> implements MultiIndexRelation<T>, Tell<T> {
         // TODO this can be faster if we remember the indices we started at. But easy just to do the simple thing for now
         const otherkeyOrdering = otherRelation.keys()
         otherRelation.relations[0].elements.forEach(row => {
+            const isRetraction = hasRetractionMeta(row)
             const datum = otherkeyOrdering.reduce((acc, key, index) => {
                 // @ts-ignore
                 acc[key] = row[index]
                 return acc
             }, {})
-            this.assert(datum as T)
+            if (isRetraction) {
+                this.retract(datum as T)
+            } else {
+                this.assert(datum as T)
+            }
         });
     }
 
-    createInitialRelation(datum: T) {
+    createInitialRelation(datum: T, isRetraction: boolean = false) {
         const entries = Object.entries(datum)
         const ks = entries.map(([k]) => k)
         const vals = entries.map(([, val]) => val)
+        if (isRetraction) {
+            // @ts-ignore
+            vals[MetaSymbol] = { isRetraction: true }
+        }
         const rel = new RelationIndex([vals] as any, ks as any) as any
         this.relations.push(rel)
     }
@@ -433,6 +488,16 @@ export class Relation<T> implements MultiIndexRelation<T>, Tell<T> {
 
         this.relations.forEach(relation => relation.assert(v))
     }
+
+    retract(v: T) {
+        if (this.relations.length === 0) {
+            this.createInitialRelation(v, true)
+            return
+        }
+
+        this.relations.forEach(relation => relation.retract(v))
+    }
+
 
     _isIndexedByK(k: keyof T) {
         return this.relations.findIndex(relation => {
@@ -498,15 +563,44 @@ export class Relation<T> implements MultiIndexRelation<T>, Tell<T> {
     }
 }
 
-export class Variable<T> implements Tell<T> {
+export const Added = Symbol("DatumAdded")
+export const Removed = Symbol("DatumRemoved")
+
+export type RecentDatum<T> = {
+    kind: typeof Added | typeof Removed
+    datum: T
+}
+
+export class Variable<T> implements Tell<T>, Retract<T> {
     stable: Relation<T> = new Relation<T>()
     recent: Relation<T> = new Relation<T>()
     toAdd: Array<Relation<T>> = []
     _recentChanges: Array<Relation<T>> = []
-    _subscribers: Array<(v: T) => void> = []
+    _subscribers: Array<(v: T, isRetraction: boolean) => void> = []
     meta: {
         isAnti: boolean
     } = { isAnti: false }
+    // Keep track of the count of datums we've seen
+    counts: Map<string, number> = new Map()
+    name: string = ""
+
+    setName(name: string) {
+        this.name = name
+    }
+
+    // TODO move this
+    relationToString(r: Relation<any>): string {
+        return "[" + r.relations[0]?.elements.map(el => hasRetractionMeta(el) ? `RETRACTION: ${JSON.stringify(el)}` : JSON.stringify(el)).join(", ") + "]"
+    }
+
+    toString(): string {
+        return `
+Variable ${this.name}:
+    Stable: ${this.relationToString(this.stable)}
+    Recent: ${this.relationToString(this.recent)}
+    ToAdd: ${this.toAdd.map(r => this.relationToString(r))}
+`
+    }
 
     clone(): Variable<T> {
         const cloned = new Variable<T>()
@@ -522,7 +616,7 @@ export class Variable<T> implements Tell<T> {
 
     cloneAndTrack(): Variable<T> {
         const cloned = this.clone()
-        this.onAssert(v => cloned.assert(v))
+        this.onAssert((v, isRetraction) => isRetraction ? cloned.retract(v) : cloned.assert(v))
         return cloned
     }
 
@@ -537,13 +631,18 @@ export class Variable<T> implements Tell<T> {
         throw new Error("Relation doesn't have any data. Can't infer schema")
     }
 
-    recentData(): Array<T> | null {
+    recentData(): Array<RecentDatum<T>> | null {
         if (!this.changed()) {
             return null
         }
         return this.recent.relations[0].elements.map(row => {
             // @ts-ignore
-            return fromEntries(row.map((v, i) => [this.recent.relations[0].keyOrdering[i], v]))
+            // console.log("ROW", row)
+            const datum = fromEntries(row.map((v, i) => [this.recent.relations[0].keyOrdering[i], v]))
+            return {
+                kind: hasRetractionMeta(row) ? Removed : Added,
+                datum: datum,
+            }
         })
     }
 
@@ -561,10 +660,28 @@ export class Variable<T> implements Tell<T> {
             this.toAdd.push(new Relation<T>())
         }
         this.toAdd[0].assert(v)
-        this._subscribers.forEach(s => s(v))
+        this._subscribers.forEach(s => s(v, false))
+        this.updateCount(v, true)
     }
 
-    onAssert(f: (v: T) => void) {
+    retract(v: T) {
+        if (this.toAdd.length === 0) {
+            this.toAdd.push(new Relation<T>())
+        }
+        this.toAdd[0].retract(v)
+        this._subscribers.forEach(s => s(v, true))
+        this.updateCount(v, false)
+    }
+
+    updateCount(v: T, increment: boolean) {
+        // Sort the keys
+        const sortedEntries = Object.entries(v).sort(([k1], [k2]) => k1 === k2 ? 0 : k1 < k2 ? -1 : 1)
+        const sortedEntriesKey = JSON.stringify(sortedEntries)
+        const existingCount = this.counts.get(sortedEntriesKey) ?? 0
+        this.counts.set(sortedEntriesKey, existingCount + (increment ? 1 : -1))
+    }
+
+    onAssert(f: (v: T, isRetraction: boolean) => void) {
         this._subscribers.push(f)
     }
 
@@ -631,6 +748,7 @@ export class Variable<T> implements Tell<T> {
                     throw new Error("Shouldn't happen")
                 }
 
+                // Filter out elements we've already seen in our relation
                 // @ts-ignore
                 indexedToAdd.elements = indexedToAdd.elements.filter(elem => {
                     let searchIdx = DataFrog.gallop(
@@ -639,6 +757,10 @@ export class Variable<T> implements Tell<T> {
                     if (searchIdx < indexedStable.elements.length &&
                         DataFrog.sortTuple(
                             indexedStable.elements[searchIdx], elem) === 0) {
+                        // Check if this is a retraction, if so let it through
+                        if (hasRetractionMeta(elem)) {
+                            return true
+                        }
                         return false
                     }
 
@@ -676,11 +798,11 @@ export function reverseRemapKeys(keyOrder: Array<string>, keyMap: { [key: string
 }
 
 type RemapKeys<In, Out> = { [K in keyof In]: keyof Out }
-export function variableJoinHelper<V1, V1Out = V1>(logicFn: (joined: V1) => void, variables: [Variable<V1>], remapKeys: [RemapKeys<V1, V1Out>], constants: [Partial<V1>]): void;
-export function variableJoinHelper<V1, V2, V1Out = V1, V2Out = V2>(logicFn: (joined: V1 & V2) => void, variables: [Variable<V1>, Variable<V2>], remapKeys: [RemapKeys<V1, V1Out>, RemapKeys<V2, V2Out>], constants: [Partial<V1>, Partial<V2>]): void;
-export function variableJoinHelper<V1, V2, V3, V1Out = V1, V2Out = V2, V3Out = V3>(logicFn: (joined: V1 & V2 & V3) => void, variables: [Variable<V1>, Variable<V2>, Variable<V3>], remapKeys: [RemapKeys<V1, V1Out>, RemapKeys<V2, V2Out>, RemapKeys<V3, V3Out>], constants: [Partial<V1>, Partial<V2>, Partial<V3>]): void;
+export function variableJoinHelper<V1, V1Out = V1>(logicFn: (joined: V1, isRetraction: boolean) => void, variables: [Variable<V1>], remapKeys: [RemapKeys<V1, V1Out>], constants: [Partial<V1>]): void;
+export function variableJoinHelper<V1, V2, V1Out = V1, V2Out = V2>(logicFn: (joined: V1 & V2, isRetraction: boolean) => void, variables: [Variable<V1>, Variable<V2>], remapKeys: [RemapKeys<V1, V1Out>, RemapKeys<V2, V2Out>], constants: [Partial<V1>, Partial<V2>]): void;
+export function variableJoinHelper<V1, V2, V3, V1Out = V1, V2Out = V2, V3Out = V3>(logicFn: (joined: V1 & V2 & V3, isRetraction: boolean) => void, variables: [Variable<V1>, Variable<V2>, Variable<V3>], remapKeys: [RemapKeys<V1, V1Out>, RemapKeys<V2, V2Out>, RemapKeys<V3, V3Out>], constants: [Partial<V1>, Partial<V2>, Partial<V3>]): void;
 
-export function variableJoinHelper(logicFn: (source: any) => void, variables: Array<any>, remapKeys: Array<any>, constants: Array<any> = []) {
+export function variableJoinHelper(logicFn: (source: any, isRetraction: boolean) => void, variables: Array<any>, remapKeys: Array<any>, constants: Array<any> = []) {
     while (variables.some(v => v.changed())) {
         innerVariableJoinHelper(logicFn, variables, remapKeys, constants, false)
     }
@@ -695,7 +817,7 @@ export function* variableJoinHelperGen(variables: Array<any>, remapKeys: Array<a
     }
 }
 
-export function innerVariableJoinHelper(logicFn: (source: any) => void, variables: Array<any>, remapKeyMetas: Array<any>, constants: Array<any> = [], stableOnly: boolean) {
+export function innerVariableJoinHelper(logicFn: (source: any, isRetraction: boolean) => void, variables: Array<any>, remapKeyMetas: Array<any>, constants: Array<any> = [], stableOnly: boolean) {
     // We have to compare:
     // All the recents
     // every stable against every other recent
@@ -791,7 +913,7 @@ export function innerVariableJoinHelper(logicFn: (source: any) => void, variable
 
             return indexedRelation
         })
-        leapJoinHelper(indexedRelations[0] as any, indexedRelations.slice(1) as any, (sourceRow, extension: any) => {
+        leapJoinHelper(indexedRelations[0] as any, indexedRelations.slice(1) as any, (sourceRow, extension: any, isRetraction: boolean) => {
             const out: any = {}
             srckeyOrder.reduce((acc: any, k: any, i: any) => {
                 if (isAutoKey(k)) {
@@ -808,7 +930,7 @@ export function innerVariableJoinHelper(logicFn: (source: any) => void, variable
                 acc[k] = extension[i]
                 return acc
             }, out)
-            logicFn(out)
+            logicFn(out, isRetraction)
         })
 
         currentIteration++
@@ -848,14 +970,14 @@ interface AntiQueryable<T extends {}> {
 }
 
 interface TableView<T extends {}> {
-    recentData(): null | Array<T>
+    recentData(): null | Array<RecentDatum<T>>
 }
 
 interface Viewable<T extends {}> {
     view(): TableView<T>
 }
 
-interface Table<T extends {}> extends Tell<T>, Queryable<T>, AntiQueryable<T>, Viewable<T> {
+interface Table<T extends {}> extends Tell<T>, Retract<T>, Queryable<T>, AntiQueryable<T>, Viewable<T> {
 }
 
 interface MaterializedTable<T extends {}> extends Queryable<T>, AntiQueryable<T>, Viewable<T> {
@@ -956,6 +1078,7 @@ export function newTable<T extends {}>(existingVar?: Variable<T>, isDerived?: bo
 
     if (!isDerived) {
         table.assert = (args: T) => variable.assert(args)
+        table.retract = (args: T) => variable.retract(args)
     }
 
     // table.clone = () => variable.clone()
@@ -1024,13 +1147,15 @@ export function query<Out>(queryFn: QueryFn<Out>): MaterializedTable<Out> {
     // @ts-ignore
     const variableParts = parts.map(([variables, remapKeys, constants]) => {
         const outVar = new Variable()
-        const runInnerQuery = () => variableJoinHelper((join) => { outVar.assert(join) }, variables, remapKeys, constants)
+        const runInnerQuery = () => variableJoinHelper((join, isRetraction) => { isRetraction ? outVar.retract(join) : outVar.assert(join) }, variables, remapKeys, constants)
         return [outVar, runInnerQuery]
     })
 
     const outVar = new Variable<Out>()
     // @ts-ignore
-    const joinFn = (join) => { outVar.assert(join) }
+    const joinFn = (join, isRetraction) => {
+        isRetraction ? outVar.retract(join) : outVar.assert(join)
+    }
     const innerVars = variableParts.map(([v]: any) => v)
 
     const constantParts = variableParts.map(() => EmptyObj)
@@ -1041,7 +1166,7 @@ export function query<Out>(queryFn: QueryFn<Out>): MaterializedTable<Out> {
         })
 
         // If some output from the parts is empty, the whole query will be empty
-        if (variableParts.some(([v]) => v.isEmpty())) {
+        if (variableParts.some(([v]: [Variable<any>]) => v.isEmpty())) {
             return
         }
         // TODO this seems buggy. Queries should work even if there isn't data available

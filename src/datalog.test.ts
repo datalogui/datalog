@@ -3,6 +3,10 @@ import * as datalog from './datalog'
 // import * as DataFrog from 'datafrog-js'
 import * as DataFrog from '../datafrog-js/index.js'
 
+function intoAddedDatums<T>(v: Array<T>): Array<datalog.RecentDatum<T>> {
+    return v.map(datum => ({ kind: datalog.Added, datum }))
+}
+
 type PersonID = number
 
 // describe('Free Variable', () => {
@@ -614,7 +618,7 @@ describe("Query", () => {
             A({ a, b })
             B({ b, c })
         })
-        expect([...queryResult.view().recentData()]).toEqual([{ a: 1, b: 2, c: 3 }])
+        expect([...queryResult.view().recentData()]).toEqual(intoAddedDatums([{ a: 1, b: 2, c: 3 }]))
     })
 
     test("People Example", () => {
@@ -644,7 +648,7 @@ describe("Query", () => {
             People({ id: parentID, name: parentName })
         })
 
-        expect([...queryResult.view().recentData()]).toEqual([{ parentID: 1, parentName: "FooDad" }, { parentID: 2, parentName: "FooMom" }, { parentID: 4, parentName: "BarDad" }, { parentID: 5, parentName: "BarMom" }])
+        expect([...queryResult.view().recentData()]).toEqual(intoAddedDatums([{ parentID: 1, parentName: "FooDad" }, { parentID: 2, parentName: "FooMom" }, { parentID: 4, parentName: "BarDad" }, { parentID: 5, parentName: "BarMom" }]))
     })
 
     test("People Example", () => {
@@ -673,7 +677,7 @@ describe("Query", () => {
         // where child.name = 'FooChild' and child.id = childID and parent.id = parentID
 
 
-        expect([...queryResult.view().recentData()]).toEqual([{ parentID: 1, parentName: "FooDad", childID: 0 }, { parentID: 2, parentName: "FooMom", childID: 0 }])
+        expect([...queryResult.view().recentData()]).toEqual(intoAddedDatums([{ parentID: 1, parentName: "FooDad", childID: 0 }, { parentID: 2, parentName: "FooMom", childID: 0 }]))
     })
 
     test("People Example. Then query result", () => {
@@ -701,7 +705,7 @@ describe("Query", () => {
             QueryResult({ parentName: "FooMom", parentID })
         })
 
-        expect([...QueryResult2.view().recentData()]).toEqual([{ parentID: 2 }])
+        expect([...QueryResult2.view().recentData()]).toEqual(intoAddedDatums([{ parentID: 2 }]))
     })
 
     test("People Example 3 joins", () => {
@@ -739,7 +743,7 @@ describe("Query", () => {
         // console.log("data", queryResult)
         const data = queryResult.view().recentData()
 
-        expect(data).toEqual([{ parentID: 1, parentName: "FooDad", childID: 0, a: 1, b: 2, c: 3 }, { parentID: 2, parentName: "FooMom", childID: 0, a: 1, b: 2, c: 3 }])
+        expect(data).toEqual(intoAddedDatums([{ parentID: 1, parentName: "FooDad", childID: 0, a: 1, b: 2, c: 3 }, { parentID: 2, parentName: "FooMom", childID: 0, a: 1, b: 2, c: 3 }]))
     })
 
     test("Chain Queries", () => {
@@ -766,7 +770,7 @@ describe("Query", () => {
         // console.log("data", queryResult)
         // Query the result
         let QueryView = QueryResult.view()
-        expect(QueryView.recentData()).toEqual([{ parentID: 2, childName: "FooChild", childID: 0 }])
+        expect(QueryView.recentData()).toEqual(intoAddedDatums([{ parentID: 2, childName: "FooChild", childID: 0 }]))
 
         // Who are the parents of these children?
         const QueryResult2 = datalog.query<{ childID: number, parentID: number, parentName: string }>(({ childID, parentID, parentName }) => {
@@ -776,7 +780,7 @@ describe("Query", () => {
         })
 
         let QueryView2 = QueryResult2.view()
-        expect(QueryView2.recentData()).toEqual([{ parentID: 1, childID: 0, parentName: "FooDad" }, { parentID: 2, childID: 0, parentName: "FooMom" }])
+        expect(QueryView2.recentData()).toEqual(intoAddedDatums([{ parentID: 1, childID: 0, parentName: "FooDad" }, { parentID: 2, childID: 0, parentName: "FooMom" }]))
 
         // Now add new data to the Table and see how the queries change
         // Note that FooBrother's dad is BarDad
@@ -794,12 +798,12 @@ describe("Query", () => {
         // Note we are asking the query to run again. This is to prevent the case where a change in the Table will cause unnecessary work.
         // For example: If QueryView2 was offscreen, we wouldn't want to waste work updating it's state. Better to do that when necessary.
         QueryResult.runQuery()
-        expect(QueryView.recentData()).toEqual([{ parentID: 2, childName: "FooBrother", childID: 4 }])
+        expect(QueryView.recentData()).toEqual(intoAddedDatums([{ parentID: 2, childName: "FooBrother", childID: 4 }]))
 
         // Now see the results of the second query
         // Note that FooMom appeared again. This is because the query runs on each child from QueryResult
         QueryResult2.runQuery()
-        expect(QueryView2.recentData()).toEqual([{ parentID: 2, childID: 4, parentName: "FooMom" }, { parentID: 3, childID: 4, parentName: "BarDad" }])
+        expect(QueryView2.recentData()).toEqual(intoAddedDatums([{ parentID: 2, childID: 4, parentName: "FooMom" }, { parentID: 3, childID: 4, parentName: "BarDad" }]))
     })
 
     test("Not Queries", () => {
@@ -828,7 +832,12 @@ describe("Query", () => {
         // // console.log("data", queryResult)
         // // Query the result
         let QueryView = QueryResult.view()
-        expect(QueryView.recentData()?.map(({ parentName }) => parentName)).toEqual(["FooDad"])
+        let recentData = QueryView.recentData()
+        expect(recentData?.filter(v => v.kind === datalog.Removed).length).toBe(0)
+
+        expect(
+            recentData?.map(v => v.datum).map(({ parentName }) => parentName)
+        ).toEqual(["FooDad"])
 
         // // Who are the parents of these children?
         // const QueryResult2 = datalog.query<{ childID: number, parentID: number, parentName: string }>(({ childID, parentID, parentName }) => {
@@ -867,162 +876,124 @@ describe("Query", () => {
     })
 })
 
-// const fs = require('fs')
-// const homedir = require('os').homedir();
-// const titles = fs.readFileSync(`${homedir}/datasets/imdb/title1k.basics.tsv`).toString().split('\n').slice(1)
-// describe.only("IMDB examples", () => {
-//     test("Movie titles", () => {
-//         const MovieTitle = datalog.newQueryableVariable<{ tconst: string, titleType: string, primaryTitle: string, originalTitle: string, isAdult: number, startYear: string, endYear: string, runTimeMinutes: number, genres: string }>()
-//         for (const title of titles) {
-//             const [tconst, titleType, primaryTitle, originalTitle, isAdult, startYear, endYear, runTimeMinutes, genres] = title.split('\t')
-//             MovieTitle.assert({ tconst, titleType, primaryTitle, originalTitle, isAdult: parseInt(isAdult), startYear, endYear, runTimeMinutes: parseInt(runTimeMinutes), genres })
-//         }
-//         const queryResult = datalog.query(({ primaryTitle, startYear }: any) => {
-//             People({ name: "FooChild", id: c })
-//             ParentOf({ c, p })
-//             People({ id: p, name: parentName })
-//         })
-//     })
-// })
+describe("Retractions", () => {
+    test("Datum Counts", () => {
+        type ID = number
+        const People = datalog.newTable<{ name: string, id: ID }>()
+        let ids = 0
 
+        People.assert({ name: "FooChild", id: ids++ })
+        People.assert({ name: "FooDad", id: ids++ })
 
+        // @ts-ignore
+        const PeopleInnerVar: datalog.Variable<{ name: string, id: ID }> = People._innerVar
 
+        expect(PeopleInnerVar.counts).toEqual(new Map([
+            ["[[\"id\",0],[\"name\",\"FooChild\"]]", 1],
+            ["[[\"id\",1],[\"name\",\"FooDad\"]]", 1]
+        ]))
 
+        People.assert({ name: "FooDad", id: 1 })
+        expect(PeopleInnerVar.counts).toEqual(new Map([
+            ["[[\"id\",0],[\"name\",\"FooChild\"]]", 1],
+            ["[[\"id\",1],[\"name\",\"FooDad\"]]", 2]
+        ]))
 
+        People.retract({ name: "FooChild", id: 0 })
+        expect(PeopleInnerVar.counts).toEqual(new Map([
+            ["[[\"id\",0],[\"name\",\"FooChild\"]]", 0],
+            ["[[\"id\",1],[\"name\",\"FooDad\"]]", 2]
+        ]))
+    })
 
+    test("Relations get updated", () => {
+        type ID = number
+        const People = datalog.newTable<{ name: string, id: ID }>()
+        let ids = 0
 
-// ------------------------------ random notes
-// I need to convert the pretty syntax into the above
+        People.assert({ name: "FooChild", id: ids++ })
+        People.assert({ name: "FooDad", id: ids++ })
 
-// Something like:
+        // @ts-ignore
+        const PeopleInnerVar: datalog.Variable<{ name: string, id: ID }> = People._innerVar
 
-// query(({a, b, c}: {a: number, b: number, c: number}) => {
-//  A({a, b})
-//  B({b, c})
-// })
+        while (PeopleInnerVar.changed()) { }
 
-// Becomes
+        expect(PeopleInnerVar.stable.relations[0].elements).toEqual([["FooChild", 0], ["FooDad", 1]])
 
-// function* () {
-//   for (let {a, b, C} of datalog.variableJoinHelperGen(A, B)) {
-//     yield {a, b, c}
-//   }
-// }
+        People.assert({ name: "FooDad", id: 1 })
+        while (PeopleInnerVar.changed()) { }
+        expect(PeopleInnerVar.stable.relations[0].elements).toEqual([["FooChild", 0], ["FooDad", 1]])
 
-// query(({a, b, c}: {a: number, b: number, c: number}) => {
-//  A({a, b})
-//  B({c})
-// })
+        People.retract({ name: "FooChild", id: 0 })
+        while (PeopleInnerVar.changed()) { }
+        expect(PeopleInnerVar.stable.relations[0].elements).toEqual([["FooDad", 1]])
+    })
 
-// Becomes
+    test("Relations get updated", () => {
+        type ID = number
+        const People = datalog.newTable<{ name: string, id: ID }>()
+        let ids = 0
 
-// function* () {
-//   for (let {a, b} of datalog.variableJoinHelperGen(A)) {
-//     for (let {c} of datalog.variableJoinHelperGen(B)) {
-//       yield {a, b, c}
-//     }
-//   }
-// }
+        People.assert({ name: "FooChild", id: ids++ })
+        People.assert({ name: "FooDad", id: ids++ })
 
-// first make a list of fn calls. i.e. [A, B], along with a list of their parameters: [{a: 'a', b: 'b'}, {c: 'c'}]
-// Transform those into two lists [[[A, {a: 'a', b: 'b'}]], [[B, {c: 'c'}]]]
+        // @ts-ignore
+        const PeopleInnerVar: datalog.Variable<{ name: string, id: ID }> = People._innerVar
 
-// then that gets transformed into:
-// function* () {
-//   for (let {a, b} of datalog.variableJoinHelperGen(A)) {
-//     for (let {c} of datalog.variableJoinHelperGen(B)) {
-//       yield {a, b, c}
-//     }
-//   }
-// }
+        while (PeopleInnerVar.changed()) { }
 
-// in the case of the triangle join on A B C
-// query(({a, b, c}) => {
-//  A({a, b})
-//  B({b, c})
-//  C({c, a})
-// })
-// Transform those into two lists: [[[A, {a: 'a', b: 'b}], [B, {b: 'b', c: 'c'}], [C: {c: 'c', a: 'a'}]]]
-// that gets transformed into:
-// function* () {
-//   for (let {a, b, c} of datalog.variableJoinHelperGen(A, B, C)) {
-//     yield {a, b, c}
-//   }
-// }
+        expect(PeopleInnerVar.stable.relations[0].elements).toEqual([["FooChild", 0], ["FooDad", 1]])
 
-// in the case of the rename:
-// query(({a1, a2}: {a1: number, a2: number}) => {
-//  A({a: a1})
-//  A({a: a2})
-// })
-// Transform those into two lists: [[[A, {a: 'a1'}]], [[A, {a: 'a2'}]]]
-// that gets transformed into:
-// function* () {
-//   for (let {a: a1} of datalog.variableJoinHelperGen(A)) {
-//     for (let {a: a2} of datalog.variableJoinHelperGen(A)) {
-//       yield {a1, a2}
-//     }
-//   }
-// }
+        People.assert({ name: "FooDad", id: 1 })
+        while (PeopleInnerVar.changed()) { }
+        expect(PeopleInnerVar.stable.relations[0].elements).toEqual([["FooChild", 0], ["FooDad", 1]])
 
+        People.retract({ name: "FooChild", id: 0 })
+        while (PeopleInnerVar.changed()) { }
+        expect(PeopleInnerVar.stable.relations[0].elements).toEqual([["FooDad", 1]])
+    })
 
-// in the case:
-// query(({a, b1, b2}) => {
-//  A({a: a, b: b1})
-//  A2({a: a, b: b2})
-// })
-// Transform those into two lists: [[[A, {a: 'a1'}]], [[A, {a: 'a2'}]]]
-// that gets transformed into:
-// function* () {
-//   for (let {a, b1, b2} of datalog.variableJoinHelperGen(remapKeys(A, {b: 'b1'}), remapKeys(A2, {b: 'b2'}))) {
-//     yield {a1, a2}
-//   }
-// }
+    test("Retractions propagate through a join", () => {
+        const A = datalog.newTable<{ a: number, b: number }>()
+        const B = datalog.newTable<{ b: number, c: number }>()
+        const C = datalog.newTable<{ a: number, c: number }>()
+        A.assert({ a: 1, b: 2 })
+        B.assert({ b: 2, c: 3 })
+        B.assert({ b: 2, c: 4 })
+        C.assert({ a: 1, c: 3 })
+        C.assert({ a: 1, c: 4 })
 
-// Something like:
+        const QueryResult = datalog.query<{ a: number, b: number, c: number }>(({ a, b, c }) => {
+            A({ a, b })
+            B({ b, c })
+            C({ a, c })
+        })
 
-// query(({a, b, c}: {a: number, b: number, c: number}) => {
-//  A({a, b})
-//  B({b, c})
-//  console.log(a, b, c)
-// })
-
-// Transform those into two lists: [[[A, {a: 'a', b: 'b'}], [B, {b: 'b',  c: 'c'}], { eval: "console.log(a,b,c)" }], []]
-// Becomes
-
-// function* () {
-//   for (let {a, b, c} of datalog.variableJoinHelperGen(A, B)) {
-//     console.log(a, b, c)
-//     yield {a, b, c}
-//   }
-// }
-
-// query(({a, b, c}: {a: number, b: number, c: number}) => {
-//  A({a, b})
-//  A({a: b, b: a})
-//  console.log(a, b)
-// })
-
-// Transform those into two lists: [[[A, {a: 'a', b: 'b'}], [B, {b: 'b',  c: 'c'}], { eval: "console.log(a,b,c)" }], []]
-// Becomes
-
-// function* () {
-//   for (let {a, b} of datalog.variableJoinHelperGen(A, remapKeys(A, {a: 'b', b: 'a'}))) {
-//     console.log(a, b, c)
-//     yield {a, b, c}
-//   }
-// }
-
-// query(({a, b, c}: {a: number, b: number, c: number}) => {
-//  A({a, b})
-//  A2({a, b})
-// })
-
-// Transform those into two lists: [[[A, {a: 'a', b: 'b'}], [B, {b: 'b',  c: 'c'}], { eval: "console.log(a,b,c)" }], []]
-// Becomes
-
-// function* () {
-//   for (let {a, b} of datalog.variableJoinHelperGen(A, remapKeys(A2, {a, b}))) {
-//     yield {a, b, c}
-//   }
-// }
+        const QueryView = QueryResult.view()
+        expect(QueryView.recentData()).toEqual(intoAddedDatums([
+            {
+                "a": 1,
+                "b": 2,
+                "c": 3,
+            }, {
+                "a": 1,
+                "b": 2,
+                "c": 4,
+            }
+        ]))
+        C.retract({ a: 1, c: 3 })
+        QueryResult.runQuery()
+        let recent = QueryView.recentData()
+        expect(recent).toEqual([
+            {
+                kind: datalog.Removed,
+                datum: {
+                    "a": 1,
+                    "b": 2,
+                    "c": 3,
+                }
+            }
+        ])
+    })
+})
