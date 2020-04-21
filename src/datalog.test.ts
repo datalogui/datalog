@@ -735,6 +735,11 @@ describe("Query", () => {
         ParentOf.assert({ parentID: 3, childID: ids - 1 }) // 1 = BarDad
         ParentOf.assert({ parentID: 2, childID: ids - 1 }) // 2 = FooMom
 
+        // Run the second query again
+        QueryResult2.runQuery()
+        // Nothing new, because there's nothing new from the first QueryView.
+        expect(QueryView2.recentData()).toEqual(null)
+
         // Run the first query again.
         // Note we are asking the query to run again. This is to prevent the case where a change in the Table will cause unnecessary work.
         // For example: If QueryView2 was offscreen, we wouldn't want to waste work updating it's state. Better to do that when necessary.
@@ -742,7 +747,7 @@ describe("Query", () => {
         expect(QueryView.recentData()).toEqual([{ parentID: 2, childName: "FooBrother", childID: 4 }])
 
         // Now see the results of the second query
-        // Note that FooMom appeared again. This is because the query runs on each child from queryResult 2.
+        // Note that FooMom appeared again. This is because the query runs on each child from QueryResult
         QueryResult2.runQuery()
         expect(QueryView2.recentData()).toEqual([{ parentID: 2, childID: 4, parentName: "FooMom" }, { parentID: 3, childID: 4, parentName: "BarDad" }])
     })

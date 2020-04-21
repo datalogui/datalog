@@ -469,6 +469,12 @@ export class Variable<T> implements Tell<T> {
         return cloned
     }
 
+    cloneAndTrack(): Variable<T> {
+        const cloned = this.clone()
+        this.onAssert(v => cloned.assert(v))
+        return cloned
+    }
+
     keys(): Array<string | number | symbol> {
         if (this.stable.length) {
             return this.stable.keys()
@@ -872,11 +878,10 @@ export function newTable<T extends {}>(existingVar?: Variable<T>, isDerived?: bo
 
     // table.clone = () => variable.clone()
     table.view = () => {
-        let cloned = variable.clone()
         // It would be nice to use something like a weakref here
         // TODO: This is a potential source of memory leaks since the view can never
         // be reclaimed unless the table also gets reclaimed.
-        variable.onAssert(v => cloned.assert(v))
+        let cloned = variable.cloneAndTrack()
 
         return cloned
     }
@@ -905,23 +910,25 @@ export function query<Out>(queryFn: QueryFn<Out>): MaterializedTable<Out> {
     // Split variables into parts
     const parts: any = [[]]
     let keySetSeen = new Set(Object.values(queryContext.remapKeys[0]))
+    // Clone the variables so each query has it's own notions of stable/recent
+    let queryVariables = queryContext.variables.map((v: Variable<any>) => v.cloneAndTrack())
     // console.log("Source keys are", queryContext)
     queryContext.remapKeys.forEach((remapKeys, i) => {
         if (i === 0) {
-            return parts[0] = [[queryContext.variables[0]], [remapKeys], [queryContext.constants[0]]]
+            return parts[0] = [[queryVariables[0]], [remapKeys], [queryContext.constants[0]]]
         }
 
         const lastPart = parts[parts.length - 1]
         const vals = Object.values(remapKeys)
         if (vals.some(k => keySetSeen.has(k))) {
-            lastPart[0].push(queryContext.variables[i])
+            lastPart[0].push(queryVariables[i])
             lastPart[1].push(queryContext.remapKeys[i])
             lastPart[2].push(queryContext.constants[i])
             vals.forEach(k => { keySetSeen.add(k) })
         } else {
             keySetSeen = new Set(vals)
             const newPart = [
-                [queryContext.variables[i]],
+                [queryVariables[i]],
                 [queryContext.remapKeys[i]],
                 [queryContext.constants[i]]
             ]
