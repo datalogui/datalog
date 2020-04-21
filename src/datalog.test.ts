@@ -201,7 +201,7 @@ describe('Relation', () => {
         expect(DataFrog.sortTuple([datalog.Unconstrained, 1], [2, 1])).toEqual(0)
     })
 
-    test.only('Test AntiExtendWithUnconstrained', () => {
+    test('Test AntiExtendWithUnconstrained', () => {
         const A = new datalog.RelationIndex<"a", number, { b: number }>([], ["a", "b"])
         const B = new datalog.RelationIndex<"b", number, { c: number }>([], ["b", "c"])
         const C = new datalog.RelationIndex<"a", number, { c: number }>([], ["a", "c"])
@@ -762,10 +762,6 @@ describe("Query", () => {
             ParentOf({ parentID, childID })
             People({ id: childID, name: childName, })
         })
-        // Equivalent SQL query: (https://www.db-fiddle.com/f/t1TA5umdcoBuG8ZPcyMWTx/1)
-        // select child.name as childName, ParentOf.childID, ParentOf.parentID, parent.name as parentName
-        // from People child, People parent, ParentOf
-        // where child.name = 'FooChild' and child.id = childID and parent.id = parentID
 
         // console.log("data", queryResult)
         // Query the result
@@ -805,6 +801,70 @@ describe("Query", () => {
         // Note that FooMom appeared again. This is because the query runs on each child from QueryResult
         QueryResult2.runQuery()
         expect(QueryView2.recentData()).toEqual([{ parentID: 2, childID: 4, parentName: "FooMom" }, { parentID: 3, childID: 4, parentName: "BarDad" }])
+    })
+
+    test("Not Queries", () => {
+        type ID = number
+        const People = datalog.newTable<{ name: string, id: ID }>()
+        const PeopleNeg = datalog.newTable<{ name: string, id: ID }>()
+        const ParentOf = datalog.newTable<{ parentID: ID, childID: ID }>()
+        let ids = 0
+
+        People.assert({ name: "FooChild", id: ids++ })
+        People.assert({ name: "FooDad", id: ids++ })
+        People.assert({ name: "FooMom", id: ids++ })
+        People.assert({ name: "BarDad", id: ids++ })
+        PeopleNeg.assert({ name: "FooMom", id: 2 })
+
+        ParentOf.assert({ parentID: 1, childID: 0 }) // 1 = FooDad, 0 = FooChild
+        ParentOf.assert({ parentID: 2, childID: 0 }) // 2 = FooMom, 0 = FooChild
+
+        // Who are the children of FooMom?
+        const QueryResult = datalog.query<{ parentName: string, parentID: number }>(({ parentName, parentID }) => {
+            People({ id: parentID, name: parentName })
+            ParentOf({ parentID })
+            People.not({ id: parentID, name: "FooMom" })
+        })
+
+        // // console.log("data", queryResult)
+        // // Query the result
+        let QueryView = QueryResult.view()
+        expect(QueryView.recentData()?.map(({ parentName }) => parentName)).toEqual(["FooDad"])
+
+        // // Who are the parents of these children?
+        // const QueryResult2 = datalog.query<{ childID: number, parentID: number, parentName: string }>(({ childID, parentID, parentName }) => {
+        //     QueryResult({ childID })
+        //     ParentOf({ childID, parentID })
+        //     // TODO it would be cool to use a not here. To not have Foo Mom appear
+        //     People({ id: parentID, name: parentName })
+        //     People.not({ id: parentID, name: "FooMom" })
+        // })
+
+        // let QueryView2 = QueryResult2.view()
+        // expect(QueryView2.recentData()).toEqual([{ parentID: 1, childID: 0, parentName: "FooDad" }])
+
+        // Now add new data to the Table and see how the queries change
+        // Note that FooBrother's dad is BarDad
+        // Foo and FooBrother are half brothers.
+        // People.assert({ name: "FooBrother", id: ids++ })
+        // ParentOf.assert({ parentID: 3, childID: ids - 1 }) // 1 = BarDad
+        // ParentOf.assert({ parentID: 2, childID: ids - 1 }) // 2 = FooMom
+
+        // // Run the second query again
+        // QueryResult2.runQuery()
+        // // Nothing new, because there's nothing new from the first QueryView.
+        // expect(QueryView2.recentData()).toEqual(null)
+
+        // Run the first query again.
+        // Note we are asking the query to run again. This is to prevent the case where a change in the Table will cause unnecessary work.
+        // For example: If QueryView2 was offscreen, we wouldn't want to waste work updating it's state. Better to do that when necessary.
+        // QueryResult.runQuery()
+        // expect(QueryView.recentData()).toEqual([{ parentID: 2, childName: "FooBrother", childID: 4 }])
+
+        // // Now see the results of the second query
+        // // Note that FooMom appeared again. This is because the query runs on each child from QueryResult
+        // QueryResult2.runQuery()
+        // expect(QueryView2.recentData()).toEqual([{ parentID: 2, childID: 4, parentName: "FooMom" }, { parentID: 3, childID: 4, parentName: "BarDad" }])
     })
 })
 

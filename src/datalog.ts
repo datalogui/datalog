@@ -6,7 +6,7 @@ type ValueOf<T> = T[keyof T];
 type Tupleized<T> = Array<ValueOf<T>>
 type TupleizedUnconstrained<T> = Array<ValueOf<T> | typeof Unconstrained>
 
-type DEBUG_LEVEL_ENUM = 0 | 1
+type DEBUG_LEVEL_ENUM = 0 | 1 | 2
 const DEBUG_LEVEL = 0
 
 // type Tupleized<K, Val> = [K, ...Array<ValueOf<Val>>]
@@ -103,33 +103,56 @@ export class ExtendWithUnconstrained<P, KName extends string | number | symbol, 
 
     count(prefix: P): number {
         const key = this.keyFunc(prefix)
-        this.startIdx = DataFrog.gallop(this.relation.elements, (row: any) => DataFrog.sortTuple(row.slice(0, key.length), key) === -1
-        )
+        // First check if our first item is past the key. This means this row doesn't exist here
+        if (DataFrog.sortTuple(this.relation.elements[0].slice(0, key.length), key) === 1) {
+            this.startIdx = this.relation.elements.length
+        } else {
+            this.startIdx = DataFrog.gallop(this.relation.elements, (row: any) => DataFrog.sortTuple(row.slice(0, key.length), key) === -1)
+        }
+
+        if (DEBUG_LEVEL > 1) {
+            if (this.isAnti) {
+                console.log("Anti count:", prefix, key, this.relation.elements, this.startIdx)
+            }
+        }
 
         // Nothing found
         if (this.startIdx === this.relation.elements.length) {
             this.endIdx = this.startIdx
             if (this.isAnti) {
-                return Infinity
+                return 1e12
             }
             return 0
         }
 
         this.endIdx = DataFrog.gallop(this.relation.elements, (row: any) => DataFrog.sortTuple(row.slice(0, key.length), key) === 0, this.startIdx)
+        const count = this.endIdx - this.startIdx
         if (this.isAnti) {
-            return Infinity
+            // return count > 0 ? 0 : 1e12
+            return 1e12
         }
-        return this.endIdx - this.startIdx
+        return count
     }
 
     propose(prefix: P): Array<TupleizedUnconstrained<Val>> {
         const keyLen = this.keyFunc(prefix).length
+        if (this.isAnti) {
+            throw new Error("Anti's shouldn't propose")
+        }
         return this.relation.elements.slice(this.startIdx, this.endIdx).map((tuple) => this.outputTupleFunc(tuple.slice(keyLen) as any))
     }
 
     // Could be faster if we mutate vals
     intersect(prefix: P, vals: Array<TupleizedUnconstrained<Val>>): Array<TupleizedUnconstrained<Val>> {
         const keyLen = this.keyFunc(prefix).length
+        if (DEBUG_LEVEL > 1 && this.isAnti) {
+            console.log("key is", prefix, this.keyFunc(prefix))
+            console.log("output key is", this.outputKeys)
+            console.log("Vals is", vals)
+            // @ts-ignore
+            console.log("My elements are", this.relation.elements.map(e => this.outputTupleFunc(e.slice(keyLen))))
+            console.log("My start/end", this.startIdx, this.endIdx)
+        }
         let startIdx = this.startIdx;
         const out: Array<TupleizedUnconstrained<Val>> = []
 
@@ -194,6 +217,10 @@ export class ExtendWithUnconstrained<P, KName extends string | number | symbol, 
                 out.push(vals[index])
             }
         }
+        if (DEBUG_LEVEL > 1) {
+            console.log("Returning: ", out)
+        }
+
 
         return out
     }
@@ -240,7 +267,7 @@ export function leapJoinHelper<KName extends string | number | symbol, KVal, Sou
                 console.warn('!!!!! - No leapers!', leaper)
             }
             const count = leaper.count(row)
-            if (DEBUG_LEVEL > 0) {
+            if (DEBUG_LEVEL > 1) {
                 console.log("Leaper", leaper, "is proposing", count, "vals")
             }
             if (count < minCount) {
@@ -305,7 +332,7 @@ export class RelationIndex<KName extends string | number | symbol, K, Val> {
         return new RelationIndex(newData, newkeyOrdering)
     }
 
-    filterElements(constants: Partial<{ [KeyName in KName]: K } & Val>): RelationIndex<KName, K, Val> {
+    filterElements(constants: Partial<{ [KeyName in KName]: K } & Val>, isAnti: boolean = false): RelationIndex<KName, K, Val> {
         if (isEmptyObj(constants)) {
             return this
         }
@@ -315,7 +342,8 @@ export class RelationIndex<KName extends string | number | symbol, K, Val> {
                 return row.every((v, i) => {
                     const constantVal = constants[this.keyOrdering[i]]
                     if (constantVal !== undefined) {
-                        return v === constantVal
+                        const isEqual = (v === constantVal)
+                        return isAnti ? !isEqual : isEqual
                     }
                     return true
                 })
@@ -478,6 +506,9 @@ export class Variable<T> implements Tell<T> {
     toAdd: Array<Relation<T>> = []
     _recentChanges: Array<Relation<T>> = []
     _subscribers: Array<(v: T) => void> = []
+    meta: {
+        isAnti: boolean
+    } = { isAnti: false }
 
     clone(): Variable<T> {
         const cloned = new Variable<T>()
@@ -485,6 +516,10 @@ export class Variable<T> implements Tell<T> {
         cloned.recent = this.recent.clone()
         cloned.toAdd = this.toAdd.map(toAdd => toAdd.clone())
         return cloned
+    }
+
+    isEmpty(): boolean {
+        return this.stable.length === 0 && this.recent.length === 0 && this.toAdd.length === 0
     }
 
     cloneAndTrack(): Variable<T> {
@@ -681,6 +716,12 @@ export function innerVariableJoinHelper(logicFn: (source: any) => void, variable
     //
     // That looks a lot like counting.
 
+    if (variables[0].meta.isAnti) {
+        throw new Error("First Table in Query cannot be an anti (.not) query.")
+    } else if (variables.length === 2 && variables[1].meta.isAnti) {
+        // throw new Error("Query must have more than 2 tables if one is an anti (.not) query")
+    }
+
     // TODO order keys by remapKeyMetas
     // const srckeyOrder = remapKeys(variables[0].keys(), remapKeyMetas[0])
     const srckeyOrder: Array<string> = Object.values(remapKeyMetas[0])
@@ -712,6 +753,14 @@ export function innerVariableJoinHelper(logicFn: (source: any) => void, variable
 
     // let currentIteration = totalIterations - 1
     while (currentIteration < totalIterations) {
+        const anyUndefinedRelation = variables.some((v, i) => (currentIteration >> i) & 1 ? v.stable.relations.length === 0 : v.recent.relations.length === 0)
+        if (anyUndefinedRelation) {
+            currentIteration++
+            continue
+        }
+        if (DEBUG_LEVEL > 0) {
+            console.log("Comparing:\n" + variables.map((v, i) => (currentIteration >> i) & 1 ? `${i}: Stable. ${JSON.stringify(v.stable.relations[0])}` : `${i}: Recent. ${JSON.stringify(v.recent.relations[0])}`).join("\n"))
+        }
         const indexedRelations = variables.map((variable, index) => {
             // check if we should return a recent or stable for this relation
             const relation = ((currentIteration >> index) & 1) ? variable.stable : variable.recent
@@ -721,8 +770,10 @@ export function innerVariableJoinHelper(logicFn: (source: any) => void, variable
                 const keyLength = restkeyLengths[index - 1]
                 let indexedRelation = relation.indexBy(reverseRemapKeys(relationKeyOrder, remapKeyMetas[index]))
                 // Filter the relation with known constants. Could make joins faster
-                if (constants[index] !== undefined) {
+                if (constants[index] !== undefined && constants[index] !== EmptyObj) {
+                    // console.log("Prefiltered indexedRelation:", indexedRelation, relation)
                     indexedRelation = indexedRelation.filterElements(constants[index])
+                    // console.log("Filtered indexedRelation", indexedRelation)
                 }
 
                 // @ts-ignore
@@ -737,12 +788,13 @@ export function innerVariableJoinHelper(logicFn: (source: any) => void, variable
                     outputKeyOrder,
                     // @ts-ignore
                     indexedRelation,
-                    relationKeyOrder
+                    relationKeyOrder,
+                    variables[index].meta.isAnti
                 )
             }
             let indexedRelation = relation.indexBy(reverseRemapKeys(srckeyOrder, remapKeyMetas[index]))
             // Filter the relation with known constants. Could make joins faster
-            if (constants[index] !== undefined) {
+            if (constants[index] !== undefined && constants[index] !== EmptyObj) {
                 indexedRelation = indexedRelation.filterElements(constants[index])
             }
 
@@ -800,6 +852,9 @@ function isEmptyObj(obj: {}) {
 interface Queryable<T extends {}> {
     (keyMap: Partial<T>): void
 }
+interface AntiQueryable<T extends {}> {
+    not(keyMap: Partial<T>): void
+}
 
 interface TableView<T extends {}> {
     recentData(): null | Array<T>
@@ -809,10 +864,10 @@ interface Viewable<T extends {}> {
     view(): TableView<T>
 }
 
-interface Table<T extends {}> extends Tell<T>, Queryable<T>, Viewable<T> {
+interface Table<T extends {}> extends Tell<T>, Queryable<T>, AntiQueryable<T>, Viewable<T> {
 }
 
-interface MaterializedTable<T extends {}> extends Queryable<T>, Viewable<T> {
+interface MaterializedTable<T extends {}> extends Queryable<T>, AntiQueryable<T>, Viewable<T> {
     runQuery: () => void
 }
 
@@ -830,27 +885,32 @@ class QueryContext {
     variables: Array<any> = []
     remapKeys: Array<any> = []
     constants: Array<any> = []
+    // Indices into which variales are anti
+    antiVariablesIndices: Set<number> = new Set()
 
     addVariable<T>(v: Variable<T>, remapKeys: any, constantVals: any) {
         this.variables.push(v)
         this.remapKeys.push(remapKeys)
         this.constants.push(constantVals)
-
     }
+
     clear() {
         this.variables = []
         this.remapKeys = []
         this.constants = []
+        this.antiVariablesIndices = new Set()
     }
 }
 
 function fromEntries<V>(entries: Array<[string, V]>): Object {
+    let nonEmpty = false
     const o = {}
     for (let [k, v] of entries) {
+        nonEmpty = true
         // @ts-ignore
         o[k] = v
     }
-    return o
+    return nonEmpty ? o : EmptyObj
 }
 
 let queryContext = new QueryContext()
@@ -892,6 +952,15 @@ export function newTable<T extends {}>(existingVar?: Variable<T>, isDerived?: bo
 
         queryContext.addVariable(variable, remapKeys, constants)
     }
+
+    const antiQuery = (keymap: any) => {
+        // Adds the variable
+        table(keymap)
+        queryContext.antiVariablesIndices.add(queryContext.variables.length - 1)
+    }
+
+    table.not = antiQuery
+
     table._innerVar = variable
 
     if (!isDerived) {
@@ -933,7 +1002,11 @@ export function query<Out>(queryFn: QueryFn<Out>): MaterializedTable<Out> {
     const parts: any = [[]]
     let keySetSeen = new Set(Object.values(queryContext.remapKeys[0]))
     // Clone the variables so each query has it's own notions of stable/recent
-    let queryVariables = queryContext.variables.map((v: Variable<any>) => v.cloneAndTrack())
+    let queryVariables = queryContext.variables.map((v: Variable<any>, i: number) => {
+        const cloned = v.cloneAndTrack()
+        cloned.meta.isAnti = queryContext.antiVariablesIndices.has(i)
+        return cloned
+    })
     // console.log("Source keys are", queryContext)
     queryContext.remapKeys.forEach((remapKeys, i) => {
         if (i === 0) {
@@ -978,6 +1051,10 @@ export function query<Out>(queryFn: QueryFn<Out>): MaterializedTable<Out> {
             runInnerQuery()
         })
 
+        // If some output from the parts is empty, the whole query will be empty
+        if (variableParts.some(([v]) => v.isEmpty())) {
+            return
+        }
         // TODO this seems buggy. Queries should work even if there isn't data available
         const remapKeysPart = variableParts.map(([v, _runQuery]: any) => fromEntries(v.keys().map((k: any) => [k, k])))
 
