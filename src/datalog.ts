@@ -783,8 +783,12 @@ interface Queryable<T extends {}> {
     (keyMap: Partial<T>): void
 }
 
+interface TableView<T extends {}> {
+    recentData(): null | Array<T>
+}
+
 interface Viewable<T extends {}> {
-    view(): Variable<T>
+    view(): TableView<T>
 }
 
 interface Table<T extends {}> extends Tell<T>, Queryable<T>, Viewable<T> {
