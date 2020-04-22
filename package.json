@@ -4,6 +4,10 @@
   "license": "(MIT OR Apache-2.0)",
   "main": "dist/datalog.js",
   "types": "dist/datalog.d.ts",
+  "files": [
+    "dist/datalog.js",
+    "dist/datalog.d.ts"
+  ],
   "devDependencies": {
     "@babel/core": "^7.8.6",
     "@babel/parser": "^7.8.6",
@@ -20,5 +24,8 @@
   },
   "scripts": {
     "test": "yarn jest"
+  },
+  "jest": {
+    "testPathIgnorePatterns": ["/node_modules/", "/dist/"]
   }
 }

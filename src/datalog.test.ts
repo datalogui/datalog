@@ -1,7 +1,7 @@
 import * as datalog from './datalog'
 // @ts-ignore
 // import * as DataFrog from 'datafrog-js'
-import * as DataFrog from '../datafrog-js/index.js'
+import * as DataFrog from './datafrog-js/index.js'
 
 function intoAddedDatums<T>(v: Array<T>): Array<datalog.RecentDatum<T>> {
     return v.map(datum => ({ kind: datalog.Added, datum }))
