@@ -22,7 +22,7 @@ pages:
   # - find build -type f -regex '.*\.\(htm\|html\|txt\|text\|js\|css\)$' -exec gzip -f -k {} \;
   artifacts:
     paths:
-    - public
+    - datalogui.dev/build
   cache:
     paths:
     - node_modules/
