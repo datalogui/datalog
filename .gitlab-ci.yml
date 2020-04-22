@@ -12,3 +12,20 @@ test:
     - node_modules/
     - .yarn
 
+pages:
+  script:
+  - cd datalogui.dev
+  - yarn build
+  - rm -rf public
+  - mv build public
+  - find public -type f -regex '.*\.\(htm\|html\|txt\|text\|js\|css\)$' -exec gzip -f -k {} \;
+  artifacts:
+    paths:
+    - public
+  cache:
+    paths:
+    - node_modules/
+    - .yarn
+  only:
+  - master
+
