@@ -17,9 +17,9 @@ pages:
   - cd datalogui.dev
   - yarn install --frozen-lockfile
   - yarn build
-  - rm -rf public
-  - mv build public
-  - find public -type f -regex '.*\.\(htm\|html\|txt\|text\|js\|css\)$' -exec gzip -f -k {} \;
+  # - rm -rf public
+  # - mv build public
+  # - find build -type f -regex '.*\.\(htm\|html\|txt\|text\|js\|css\)$' -exec gzip -f -k {} \;
   artifacts:
     paths:
     - public
