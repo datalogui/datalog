@@ -20,7 +20,7 @@ pages:
   # - rm -rf public
   - mv build ../public
   # - cd ..
-  # - find build -type f -regex '.*\.\(htm\|html\|txt\|text\|js\|css\)$' -exec gzip -f -k {} \;
+  # - find public -type f -regex '.*\.\(htm\|html\|txt\|text\|js\|css\)$' -exec gzip -f -k {} \;
   artifacts:
     paths:
     - public
