@@ -15,6 +15,7 @@ test:
 pages:
   script:
   - cd datalogui.dev
+  - yarn install --frozen-lockfile
   - yarn build
   - rm -rf public
   - mv build public
