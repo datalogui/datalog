@@ -515,8 +515,8 @@ describe("Helpers", () => {
 
 describe("Query", () => {
     test("Hello World join", () => {
-        const A = datalog.newTable<{ a: number, b: number }>()
-        const B = datalog.newTable<{ b: number, c: number }>()
+        const A = datalog._newTable<{ a: number, b: number }>()
+        const B = datalog._newTable<{ b: number, c: number }>()
         A.assert({ a: 1, b: 2 })
         B.assert({ b: 2, c: 3 })
 
@@ -529,8 +529,8 @@ describe("Query", () => {
 
     test("People Example", () => {
         type ID = number
-        const People = datalog.newTable<{ name: string, id: ID }>()
-        const ParentOf = datalog.newTable<{ parentID: ID, childID: ID }>()
+        const People = datalog._newTable<{ name: string, id: ID }>()
+        const ParentOf = datalog._newTable<{ parentID: ID, childID: ID }>()
 
         let ids = 0
 
@@ -559,8 +559,8 @@ describe("Query", () => {
 
     test("People Example", () => {
         type ID = number
-        const People = datalog.newTable<{ name: string, id: ID }>()
-        const ParentOf = datalog.newTable<{ parentID: ID, childID: ID }>()
+        const People = datalog._newTable<{ name: string, id: ID }>()
+        const ParentOf = datalog._newTable<{ parentID: ID, childID: ID }>()
 
         let ids = 0
 
@@ -588,8 +588,8 @@ describe("Query", () => {
 
     test("People Example. Then query result", () => {
         type ID = number
-        const People = datalog.newTable<{ name: string, id: ID }>()
-        const ParentOf = datalog.newTable<{ parentID: ID, childID: ID }>()
+        const People = datalog._newTable<{ name: string, id: ID }>()
+        const ParentOf = datalog._newTable<{ parentID: ID, childID: ID }>()
 
         let ids = 0
 
@@ -616,10 +616,10 @@ describe("Query", () => {
 
     test("People Example 3 joins", () => {
         type ID = number
-        const People = datalog.newTable<{ name: string, id: ID }>()
-        const ParentOf = datalog.newTable<{ parentID: ID, childID: ID }>()
-        const A = datalog.newTable<{ a: number, b: number }>()
-        const B = datalog.newTable<{ b: number, c: number }>()
+        const People = datalog._newTable<{ name: string, id: ID }>()
+        const ParentOf = datalog._newTable<{ parentID: ID, childID: ID }>()
+        const A = datalog._newTable<{ a: number, b: number }>()
+        const B = datalog._newTable<{ b: number, c: number }>()
 
         let ids = 0
 
@@ -654,8 +654,8 @@ describe("Query", () => {
 
     test("Chain Queries", () => {
         type ID = number
-        const People = datalog.newTable<{ name: string, id: ID }>()
-        const ParentOf = datalog.newTable<{ parentID: ID, childID: ID }>()
+        const People = datalog._newTable<{ name: string, id: ID }>()
+        const ParentOf = datalog._newTable<{ parentID: ID, childID: ID }>()
         let ids = 0
 
         People.assert({ name: "FooChild", id: ids++ })
@@ -714,9 +714,9 @@ describe("Query", () => {
 
     test("Not Queries", () => {
         type ID = number
-        const People = datalog.newTable<{ name: string, id: ID }>()
-        const PeopleNeg = datalog.newTable<{ name: string, id: ID }>()
-        const ParentOf = datalog.newTable<{ parentID: ID, childID: ID }>()
+        const People = datalog._newTable<{ name: string, id: ID }>()
+        const PeopleNeg = datalog._newTable<{ name: string, id: ID }>()
+        const ParentOf = datalog._newTable<{ parentID: ID, childID: ID }>()
         let ids = 0
 
         People.assert({ name: "FooChild", id: ids++ })
@@ -785,7 +785,7 @@ describe("Query", () => {
 describe("Retractions", () => {
     test("Datum Counts", () => {
         type ID = number
-        const People = datalog.newTable<{ name: string, id: ID }>()
+        const People = datalog._newTable<{ name: string, id: ID }>()
         let ids = 0
 
         People.assert({ name: "FooChild", id: ids++ })
@@ -814,7 +814,7 @@ describe("Retractions", () => {
 
     test("Relations get updated", () => {
         type ID = number
-        const People = datalog.newTable<{ name: string, id: ID }>()
+        const People = datalog._newTable<{ name: string, id: ID }>()
         let ids = 0
 
         People.assert({ name: "FooChild", id: ids++ })
@@ -838,7 +838,7 @@ describe("Retractions", () => {
 
     test("Relations get updated", () => {
         type ID = number
-        const People = datalog.newTable<{ name: string, id: ID }>()
+        const People = datalog._newTable<{ name: string, id: ID }>()
         let ids = 0
 
         People.assert({ name: "FooChild", id: ids++ })
@@ -861,9 +861,9 @@ describe("Retractions", () => {
     })
 
     test("Retractions propagate through a join", () => {
-        const A = datalog.newTable<{ a: number, b: number }>()
-        const B = datalog.newTable<{ b: number, c: number }>()
-        const C = datalog.newTable<{ a: number, c: number }>()
+        const A = datalog._newTable<{ a: number, b: number }>()
+        const B = datalog._newTable<{ b: number, c: number }>()
+        const C = datalog._newTable<{ a: number, c: number }>()
         A.assert({ a: 1, b: 2 })
         B.assert({ b: 2, c: 3 })
         B.assert({ b: 2, c: 4 })
@@ -899,6 +899,38 @@ describe("Retractions", () => {
                     "b": 2,
                     "c": 3,
                 }
+            }
+        ])
+    })
+})
+
+describe("Reading Data", () => {
+    test("Read all Data", () => {
+        const A = datalog._newTable<{ a: number, b: number }>()
+        const B = datalog._newTable<{ b: number, c: number }>()
+        const C = datalog._newTable<{ a: number, c: number }>()
+        A.assert({ a: 1, b: 2 })
+        B.assert({ b: 2, c: 3 })
+        B.assert({ b: 2, c: 4 })
+        C.assert({ a: 1, c: 3 })
+        C.assert({ a: 1, c: 4 })
+
+        const QueryResult = datalog.query<{ a: number, b: number, c: number }>(({ a, b, c }) => {
+            A({ a, b })
+            B({ b, c })
+            C({ a, c })
+        })
+
+        const QueryView = QueryResult.view()
+        expect(QueryView.readAllData()).toEqual([
+            {
+                "a": 1,
+                "b": 2,
+                "c": 3,
+            }, {
+                "a": 1,
+                "b": 2,
+                "c": 4,
             }
         ])
     })

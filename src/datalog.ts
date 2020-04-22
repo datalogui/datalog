@@ -586,13 +586,26 @@ Variable ${this.name}:
         }
         return this.recent.relations[0].elements.map(row => {
             // @ts-ignore
-            // console.log("ROW", row)
             const datum = fromEntries(row.map((v, i) => [this.recent.relations[0].keyOrdering[i], v]))
             return {
                 kind: hasRetractionMeta(row) ? Removed : Added,
                 datum: datum,
             }
         })
+    }
+
+    private lastReadAllData: Array<T> = []
+    readAllData(): Array<T> {
+        if (!this.changed()) {
+            return this.lastReadAllData
+        }
+        while (this.changed()) { }
+        this.lastReadAllData = this.stable.relations[0].elements.map(row => {
+            // @ts-ignore
+            const datum = fromEntries(row.map((v, i) => [this.stable.relations[0].keyOrdering[i], v]))
+            return datum
+        })
+        return this.lastReadAllData
     }
 
     _remapKeys<In, Out>(newKeyOrdering: { [K in keyof In]: keyof Out }): Variable<Out> {
@@ -909,6 +922,7 @@ interface AntiQueryable<T extends {}> {
 
 export interface TableView<T extends {}> {
     recentData(): null | Array<RecentDatum<T>>
+    readAllData(): Array<T>
 }
 
 interface Viewable<T extends {}> {
@@ -918,15 +932,22 @@ interface Viewable<T extends {}> {
 export interface Table<T extends {}> extends Tell<T>, Retract<T>, Queryable<T>, AntiQueryable<T>, Viewable<T> {
 }
 
+type UnsubscribeFn = () => void
 export interface MaterializedTable<T extends {}> extends Queryable<T>, AntiQueryable<T>, Viewable<T> {
     runQuery: () => void
+    /**
+     * Subscribe to when a dependency of this MaterializedTable has change.
+     * Useful if you want to know when you should rerurn the query
+     */
+    onDependencyChange: (subscriber: () => void) => UnsubscribeFn
 }
 
-function newMaterializedTable<T>(v: Variable<T>, runQuery: () => void): MaterializedTable<T> {
+function newMaterializedTable<T>(v: Variable<T>, runQuery: () => void, onDependencyChange: (s: () => void) => UnsubscribeFn): MaterializedTable<T> {
     const outVar = new Variable<T>()
-    const innerTable = newTable(v, true)
+    const innerTable = _newTable(v, true)
     const materializedTable = innerTable as unknown as MaterializedTable<T>
     materializedTable.runQuery = runQuery
+    materializedTable.onDependencyChange = onDependencyChange
     return materializedTable
 
 }
@@ -977,7 +998,40 @@ function isAutoKey(k: string): boolean {
     return k.startsWith('___')
 }
 
-export function newTable<T extends {}>(existingVar?: Variable<T>, isDerived?: boolean): Table<T> {
+
+// TODO these validators are not used
+type TypeValidator = { typeName: string, validate: (t: any) => boolean }
+type TableSchema<Keys extends string | number | symbol> = { [K in Keys]: TypeValidator }
+export function newTable<T extends {}>(schema: TableSchema<keyof T>): Table<T> {
+    return _newTable(undefined, false, schema)
+}
+
+export const StringType = {
+    typeName: 'string',
+    validate: (t: any) => typeof t === 'string'
+}
+
+export const NumberType = {
+    typeName: 'number',
+    validate: (t: any) => typeof t === 'number'
+}
+
+export const BoolType = {
+    typeName: 'boolean',
+    validate: (t: any) => typeof t === 'boolean'
+}
+
+export const ObjectType = {
+    typeName: 'object',
+    validate: (t: any) => typeof t === 'object'
+}
+
+export const ArrayType = {
+    typeName: 'object',
+    validate: (t: any) => Array.isArray(t)
+}
+
+export function _newTable<T extends {}>(existingVar?: Variable<T>, isDerived?: boolean, schema?: TableSchema<keyof T>): Table<T> {
     const variable = existingVar || new Variable<T>()
     const table = (keymap: any) => {
         const constants = fromEntries(Object.entries(keymap).filter(([k, v]: any) => {
@@ -986,7 +1040,9 @@ export function newTable<T extends {}>(existingVar?: Variable<T>, isDerived?: bo
             }
             return true
         }))
-        const inferredKeys = variable.keys()
+
+        // If there's a schema, use that. Otherwise attempt to infer from the variable
+        const inferredKeys = schema ? Object.keys(schema) : variable.keys()
         const remapKeys = fromEntries(Object.entries(keymap).map(([k, v]: any) => {
             if (typeof v === 'object' && v && 'ns' in v && v.ns === FreeVarNS) {
                 return [k, v.k]
@@ -1045,7 +1101,7 @@ export type SchemaOf<V> = V extends Table<infer T> ? T : never
 
 const EmptyObj = {}
 
-type QueryFn<Out> = (freeVars: Out) => void
+export type QueryFn<Out> = (freeVars: Out) => void
 export function query<Out>(queryFn: QueryFn<Out>): MaterializedTable<Out> {
     queryContext = new QueryContext()
     // @ts-ignore – a trick
@@ -1059,6 +1115,7 @@ export function query<Out>(queryFn: QueryFn<Out>): MaterializedTable<Out> {
         cloned.meta.isAnti = queryContext.antiVariablesIndices.has(i)
         return cloned
     })
+
     queryContext.remapKeys.forEach((remapKeys, i) => {
         if (i === 0) {
             return parts[0] = [[queryVariables[0]], [remapKeys], [queryContext.constants[0]]]
@@ -1107,13 +1164,27 @@ export function query<Out>(queryFn: QueryFn<Out>): MaterializedTable<Out> {
         if (variableParts.some(([v]: [Variable<any>]) => v.isEmpty())) {
             return
         }
+
         // TODO this seems buggy. Queries should work even if there isn't data available
         const remapKeysPart = variableParts.map(([v, _runQuery]: any) => fromEntries(v.keys().map((k: any) => [k, k])))
 
         variableJoinHelper(joinFn, innerVars, remapKeysPart, constantParts)
     }
 
-    const outMaterializedTable = newMaterializedTable(outVar, runQuery)
+
+    let dependencyChangeSubscribers: Array<() => void> = []
+    queryVariables.forEach(v => {
+        v.onAssert(() => {
+            dependencyChangeSubscribers.forEach(f => f())
+        })
+    })
+    const onDependencyChange = (subscriber: () => void) => {
+        dependencyChangeSubscribers.push(subscriber)
+        return () => {
+            dependencyChangeSubscribers = dependencyChangeSubscribers.filter(f => f !== subscriber)
+        }
+    }
+    const outMaterializedTable = newMaterializedTable(outVar, runQuery, onDependencyChange)
 
     // Run query once
     outMaterializedTable.runQuery()

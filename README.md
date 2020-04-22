@@ -6,9 +6,12 @@
 * Queries are JS
 
 
-## TODO
+## TODOs
 
 ### Hook up to React
+
+### Nicer update semantics
+Kind of clunky (and error prone) to retract the whole thing, then assert a new thing
 
 ### Notify on change (or when you should rerun a query)
 
