@@ -18,11 +18,12 @@ pages:
   - yarn install --frozen-lockfile
   - yarn build
   # - rm -rf public
-  # - mv build public
+  - mv build ../public
+  # - cd ..
   # - find build -type f -regex '.*\.\(htm\|html\|txt\|text\|js\|css\)$' -exec gzip -f -k {} \;
   artifacts:
     paths:
-    - datalogui.dev/build
+    - public
   cache:
     paths:
     - node_modules/
