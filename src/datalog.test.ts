@@ -935,3 +935,140 @@ describe("Reading Data", () => {
         ])
     })
 })
+
+describe("Examples from docs", () => {
+    describe("Usage", () => {
+        const People = datalog.newTable<{ id: number, name: string }>({
+            id: datalog.NumberType,
+            name: datalog.StringType,
+        })
+
+        test("Add Data", () => {
+            People.assert({ id: 0, name: "Alice" })
+            People.assert({ id: 1, name: "Bob" })
+        })
+
+        test("Retract data", () => {
+            People.retract({ id: 1, name: "Bob" })
+        })
+
+        test("Find everyone's name", () => {
+            // Returns all the names of everyone in the People database
+            const Query = datalog.query<{ name: string }>(({ name }) => {
+                People({ name })
+            })
+
+            // Read the QueryResult
+            expect(
+                Query.view().readAllData()
+            ).toEqual([{ name: "Alice" }])
+        })
+
+        describe("Querying Data with joins", () => {
+            const People = datalog.newTable<{ id: number, name: string }>({
+                id: datalog.NumberType,
+                name: datalog.StringType,
+            })
+            People.assert({ id: 0, name: "Alice" })
+            People.assert({ id: 1, name: "Bob" })
+
+            type ID = number
+            const Manages = datalog.newTable<{ manager: ID, managee: ID }>({
+                manager: datalog.NumberType,
+                managee: datalog.NumberType,
+            })
+
+            // Alice manages Bob
+            Manages.assert({ manager: 0, managee: 1 })
+
+            test("Everyone with a manager", () => {
+                const Query = datalog.query<{ managerName: string, personName: string, personID, managerID }>(({ managerName, personName, managerID, personID }) => {
+                    People({ id: personID, name: personName })
+                    Manages({ managee: personID, manager: managerID })
+                    People({ id: managerID, name: managerName })
+                })
+
+                expect(
+                    Query.view().readAllData()
+                ).toEqual([{
+                    managerID: 0,
+                    managerName: "Alice",
+                    personID: 1,
+                    personName: "Bob",
+                }])
+            })
+
+            test("Everyone without a manager", () => {
+                const Query = datalog.query<{ personID: number, personName: string }>(({ personName, personID }) => {
+                    People({ id: personID })
+                    People({ id: personID, name: personName })
+                    Manages.not({ managee: personID })
+                })
+
+                expect(
+                    Query.view().readAllData()
+                ).toEqual([{
+                    personID: 0,
+                    personName: "Alice",
+                }])
+            })
+        })
+
+
+        test("Differential Updates", () => {
+            const People = datalog.newTable<{ id: number, name: string }>({
+                id: datalog.NumberType,
+                name: datalog.StringType,
+            })
+            People.assert({ id: 0, name: "Alice" })
+            const Query = datalog.query<{ name: string }>(({ name }) => {
+                People({ name })
+            })
+
+            const queryView = Query.view()
+
+            expect(
+                queryView.recentData()
+            ).toEqual(
+                [{
+                    kind: datalog.Added,
+                    datum: { name: "Alice" }
+                }]
+            )
+
+            expect(
+                queryView.recentData()
+            ).toEqual(null)
+
+
+            People.assert({ id: 2, name: "Eve" })
+            expect(
+                queryView.recentData()
+            ).toEqual(null)
+            // We changed the data, but go nothing back! what gives?
+            // Queries won't run themselves (except the first time when created).
+            // so we have to ask the query to run itself to see the updates
+            Query.runQuery()
+
+            // This is an optimization so you don't pay for queries you aren't using.
+            // If you do want to run a query every time you can hook up the runQuery function to happen on dependency change
+            Query.onDependencyChange(() => Query.runQuery())
+
+            expect(
+                queryView.recentData()
+            ).toEqual([{
+                kind: datalog.Added,
+                datum: { name: "Eve" }
+            }])
+
+            People.retract({ id: 2, name: "Eve" })
+
+            expect(
+                queryView.recentData()
+            ).toEqual([{
+                kind: datalog.Removed,
+                datum: { name: "Eve" }
+            }])
+        })
+    })
+})

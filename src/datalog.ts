@@ -103,7 +103,7 @@ export class ExtendWithUnconstrained<P, KName extends string | number | symbol, 
     propose(prefix: P): Array<TupleizedUnconstrained<Val>> {
         const keyLen = this.keyFunc(prefix).length
         if (this.isAnti) {
-            throw new Error("Anti's shouldn't propose")
+            throw new Error("Antis shouldn't propose")
         }
         // console.log("In propose", this.relation.elements[0])
         return this.relation.elements.slice(this.startIdx, this.endIdx).map((tuple) => this._reshape(tuple as any, keyLen))
@@ -285,6 +285,10 @@ function hasRetractionMeta(v: any): boolean {
     return !!v[MetaSymbol]?.isRetraction
 }
 
+function setRetractionMeta(v: any, isRetraction: boolean) {
+    v[MetaSymbol] = { isRetraction }
+}
+
 export class RelationIndex<KName extends string | number | symbol, K, Val> {
     // Array of tuples
     elements: Array<[K, ...Array<ValueOf<Val>>]>
@@ -307,7 +311,13 @@ export class RelationIndex<KName extends string | number | symbol, K, Val> {
             return acc
         }, {})
 
-        const newData = this.elements.map(row => newkeyOrdering.map(k => row[keyMapping[k as string]])) as Array<[NewK, ...Array<ValueOf<NewVal>>]>
+        const newData = this.elements.map(row => {
+            const newRow = newkeyOrdering.map(k => row[keyMapping[k as string]])
+            if (hasRetractionMeta(row)) {
+                setRetractionMeta(newRow, true)
+            }
+            return newRow
+        }) as Array<[NewK, ...Array<ValueOf<NewVal>>]>
         newData.sort((rowA, rowB) => DataFrog.sortTuple(rowA, rowB))
         return new RelationIndex(newData, newkeyOrdering)
     }
@@ -382,6 +392,12 @@ export class Relation<T> implements MultiIndexRelation<T>, Tell<T>, Retract<T> {
     relations: Array<RelationIndex<keyof T, ValueOf<T>, { [K in keyof T]: T[K] }>> = []
     constructor() {
         this.relations = []
+    }
+    toString(): string {
+        if (!this.relations[0]) {
+            return ""
+        }
+        return "[" + this.relations[0]?.elements.map(el => hasRetractionMeta(el) ? `RETRACTION: ${JSON.stringify(el)}` : JSON.stringify(el)).join(", ") + "]"
     }
 
 
@@ -537,17 +553,12 @@ export class Variable<T> implements Tell<T>, Retract<T> {
         this.name = name
     }
 
-    // TODO move this
-    relationToString(r: Relation<any>): string {
-        return "[" + r.relations[0]?.elements.map(el => hasRetractionMeta(el) ? `RETRACTION: ${JSON.stringify(el)}` : JSON.stringify(el)).join(", ") + "]"
-    }
-
     toString(): string {
         return `
 Variable ${this.name}:
-    Stable: ${this.relationToString(this.stable)}
-    Recent: ${this.relationToString(this.recent)}
-    ToAdd: ${this.toAdd.map(r => this.relationToString(r))}
+    Stable: ${this.stable.toString()}
+    Recent: ${this.recent.toString()}
+    ToAdd: ${this.toAdd.map(r => r.toString())}
 `
     }
 
@@ -594,9 +605,9 @@ Variable ${this.name}:
         })
     }
 
-    private lastReadAllData: Array<T> = []
+    private lastReadAllData: Array<T> | null = null
     readAllData(): Array<T> {
-        if (!this.changed()) {
+        if (!this.changed() && this.lastReadAllData !== null) {
             return this.lastReadAllData
         }
         while (this.changed()) { }
@@ -935,11 +946,13 @@ export interface Table<T extends {}> extends Tell<T>, Retract<T>, Queryable<T>, 
 type UnsubscribeFn = () => void
 export interface MaterializedTable<T extends {}> extends Queryable<T>, AntiQueryable<T>, Viewable<T> {
     runQuery: () => void
+    toString: () => string
     /**
      * Subscribe to when a dependency of this MaterializedTable has change.
      * Useful if you want to know when you should rerurn the query
      */
     onDependencyChange: (subscriber: () => void) => UnsubscribeFn
+    // queryVariables: null | Array<Variable<any>>
 }
 
 function newMaterializedTable<T>(v: Variable<T>, runQuery: () => void, onDependencyChange: (s: () => void) => UnsubscribeFn): MaterializedTable<T> {
@@ -1188,6 +1201,13 @@ export function query<Out>(queryFn: QueryFn<Out>): MaterializedTable<Out> {
 
     // Run query once
     outMaterializedTable.runQuery()
+
+    // @ts-ignore
+    outMaterializedTable.queryVariables = queryVariables
+
+    outVar.setName("Query")
+    // @ts-ignore
+    outMaterializedTable.toString = () => outVar.toString()
 
     return outMaterializedTable
 }
