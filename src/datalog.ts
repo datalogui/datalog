@@ -612,6 +612,9 @@ Variable ${this.name}:
             return this.lastReadAllData
         }
         while (this.changed()) { }
+        if (!this.stable.relations[0]) {
+            return []
+        }
         this.lastReadAllData = this.stable.relations[0].elements.map(row => {
             // @ts-ignore
             const datum = fromEntries(row.map((v, i) => [this.stable.relations[0].keyOrdering[i], v]))
