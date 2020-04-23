@@ -488,7 +488,7 @@ export class Relation<T> implements MultiIndexRelation<T>, Tell<T>, Retract<T> {
         return this.relations[0].keyOrdering
     }
 
-    indexByk(k: keyof T) {
+    indexByK(k: keyof T) {
         if (this.relations.length === 0) {
             console.warn("No Data to index by")
             const relation = new RelationIndex<keyof T, T[keyof T], T>([], [k])
@@ -509,8 +509,7 @@ export class Relation<T> implements MultiIndexRelation<T>, Tell<T>, Retract<T> {
         return newIndexedRelation
     }
 
-    // @ts-ignore
-    indexBy(ks: [keyof T, ...Array<keyof T>]) {
+    indexBy(ks: [keyof T, ...Array<keyof T>]): RelationIndex<keyof T, keyof T, T> {
         if (this.relations.length === 0) {
             // console.warn("No Data to index by")
             return new RelationIndex<keyof T, keyof T, T>([], ks)
@@ -518,12 +517,14 @@ export class Relation<T> implements MultiIndexRelation<T>, Tell<T>, Retract<T> {
 
         const indexedRelationIdx = this._isIndexedBy(ks)
         if (indexedRelationIdx !== -1) {
+            // @ts-ignore
             return this.relations[indexedRelationIdx]
         }
 
         const newIndexedRelation = this.relations[0].indexBy(ks)
         // @ts-ignore
         this.relations.push(newIndexedRelation)
+        // @ts-ignore
         return newIndexedRelation
     }
 }

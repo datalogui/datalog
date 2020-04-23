@@ -1,6 +1,4 @@
 import * as datalog from './datalog'
-// @ts-ignore
-// import * as DataFrog from 'datafrog-js'
 import * as DataFrog from './datafrog-js/index.js'
 
 function intoAddedDatums<T>(v: Array<T>): Array<datalog.RecentDatum<T>> {

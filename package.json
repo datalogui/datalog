@@ -21,12 +21,15 @@
     "typescript": "^3.8.3",
     "webpack": "^4.42.0",
     "webpack-cli": "^3.3.11"
-
   },
   "scripts": {
-    "test": "yarn jest"
+    "test": "yarn jest",
+    "prepublish": "tsc"
   },
   "jest": {
-    "testPathIgnorePatterns": ["/node_modules/", "/dist/"]
+    "testPathIgnorePatterns": [
+      "/node_modules/",
+      "/dist/"
+    ]
   }
 }
