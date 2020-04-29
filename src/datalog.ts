@@ -12,7 +12,7 @@ const DEBUG_LEVEL = 0
 // type Tupleized<K, Val> = [K, ...Array<ValueOf<Val>>]
 
 interface Leaper<P, V> {
-    count: (prefix: P) => number
+    count: (prefix: P, isAntiFilterOnly?: boolean) => number
     propose: (prefix: P) => Array<V>
     // Could be faster if we mutate vals
     intersect: (prefix: P, vals: Array<V>) => Array<V>
@@ -54,7 +54,12 @@ export class ExtendWithUnconstrained<P, KName extends string | number | symbol, 
         }
     }
 
-    count(prefix: P): number {
+    /**
+     *
+     * @param prefix
+     * @param isAntiFilterOnly Should this act as a filter. In the case of only anti leapers
+     */
+    count(prefix: P, isAntiFilterOnly?: boolean): number {
         const key = this.keyFunc(prefix)
         // First check if our first item is past the key. This means this row doesn't exist here
         if (DataFrog.sortTuple(this.relation.elements[0].slice(0, key.length), key) === 1) {
@@ -81,7 +86,9 @@ export class ExtendWithUnconstrained<P, KName extends string | number | symbol, 
         this.endIdx = DataFrog.gallop(this.relation.elements, (row: any) => DataFrog.sortTuple(row.slice(0, key.length), key) === 0, this.startIdx)
         const count = this.endIdx - this.startIdx
         if (this.isAnti) {
-            // return count > 0 ? 0 : 1e12
+            if (isAntiFilterOnly) {
+                return count > 0 ? 0 : 1e12
+            }
             return 1e12
         }
         return count
@@ -217,7 +224,8 @@ export function filterKeys(keysToKeep: Array<string>, keyOrder: Array<string>) {
 }
 
 type LeapJoinLogicFn<KVal, SourceVal, Extension> = (sourceRow: [KVal, ...Array<ValueOf<SourceVal>>], extension: Extension, isRetraction: boolean) => void
-export function leapJoinHelper<KName extends string | number | symbol, KVal, SourceVal, Extension>(source: RelationIndex<KName, KVal, SourceVal>, leapers: Array<Leaper<[KVal, ...Array<ValueOf<SourceVal>>], Extension>>, logic: LeapJoinLogicFn<KVal, SourceVal, Extension>) {
+export function leapJoinHelper<KName extends string | number | symbol, KVal, SourceVal, Extension>(source: RelationIndex<KName, KVal, SourceVal>, leapers: Array<Leaper<[KVal, ...Array<ValueOf<SourceVal>>], Extension> & { isAnti?: boolean }>, logic: LeapJoinLogicFn<KVal, SourceVal, Extension>) {
+    // Special case: no leapers
     if (leapers.length === 0) {
         source.elements.forEach(row => {
             const rowIsRetraction = hasRetractionMeta(row)
@@ -226,6 +234,21 @@ export function leapJoinHelper<KName extends string | number | symbol, KVal, Sou
         })
         return
     }
+    // Special case: only anti-leapers
+    if (leapers.every(l => l.isAnti)) {
+        source.elements.forEach(row => {
+            // Does any leaper reject this row?
+            if (leapers.some(l => l.count(row, true) === 0)) {
+                return
+            }
+
+            const rowIsRetraction = hasRetractionMeta(row)
+            // @ts-ignore
+            logic(row, [], rowIsRetraction)
+        })
+        return
+    }
+
     for (const row of source.elements) {
         // 1. Determine which leaper would propose the fewest values.
         let minIndex = Infinity;

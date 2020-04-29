@@ -998,7 +998,6 @@ describe("Examples from docs", () => {
 
             test("Everyone without a manager", () => {
                 const Query = datalog.query<{ personID: number, personName: string }>(({ personName, personID }) => {
-                    People({ id: personID })
                     People({ id: personID, name: personName })
                     Manages.not({ managee: personID })
                 })
