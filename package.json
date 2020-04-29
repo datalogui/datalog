@@ -2,9 +2,10 @@
   "name": "@datalogui/datalog",
   "version": "0.0.3",
   "license": "(MIT OR Apache-2.0)",
-  "main": "dist/datalog.js",
-  "types": "dist/datalog.d.ts",
+  "main": "dist/index.js",
+  "types": "dist/index.d.ts",
   "files": [
+    "dist/index.js",
     "dist/datalog.js",
     "dist/datalog.d.ts",
     "dist/datafrog-js/index.js"
