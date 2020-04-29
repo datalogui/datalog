@@ -1,5 +1,4 @@
 import * as datalog from './datalog'
-import * as DataFrog from './datafrog-js/index.js'
 
 function intoAddedDatums<T>(v: Array<T>): Array<datalog.RecentDatum<T>> {
     return v.map(datum => ({ kind: datalog.Added, datum }))
@@ -119,7 +118,7 @@ describe('Relation', () => {
         })
         expect(out).toEqual([[1, 2, 3, 0], [1, 2, 3, 2], [1, 2, 3, 4]])
 
-        expect(DataFrog.sortTuple([datalog.Unconstrained, 1], [2, 1])).toEqual(0)
+        expect(datalog.sortTuple([datalog.Unconstrained, 1], [2, 1])).toEqual(0)
     })
 
     test('Test AntiExtendWithUnconstrained', () => {
@@ -174,7 +173,7 @@ describe('Relation', () => {
         })
         expect(out).toEqual([[1, 2, 4]])
 
-        expect(DataFrog.sortTuple([datalog.Unconstrained, 1], [2, 1])).toEqual(0)
+        expect(datalog.sortTuple([datalog.Unconstrained, 1], [2, 1])).toEqual(0)
     })
 
     test('Filter out missing keys', () => {

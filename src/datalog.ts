@@ -1,5 +1,4 @@
-// @ts-ignore
-import * as DataFrog from './datafrog-js/index.js'
+export const Unconstrained = Symbol('Unconstrained')
 
 type ValueOf<T> = T[keyof T];
 
@@ -9,7 +8,76 @@ type TupleizedUnconstrained<T> = Array<ValueOf<T> | typeof Unconstrained>
 type DEBUG_LEVEL_ENUM = 0 | 1 | 2
 const DEBUG_LEVEL = 0
 
-// type Tupleized<K, Val> = [K, ...Array<ValueOf<Val>>]
+
+
+// Finds the first index for which predicate is false. Returns an index of
+// array.length if it will never be false
+// predFn takes the form of (tuple) => boolean
+function gallop(array: Array<any>, predFn: (tuple: Array<any>) => boolean, startIdx = 0): number {
+    if (array.length - startIdx <= 0 || !predFn(array[startIdx])) {
+        return startIdx;
+    }
+
+    let step = 1;
+
+    // Step up until we've seen a false result from predFn
+    while (startIdx + step < array.length && predFn(array[startIdx + step])) {
+        startIdx += step;
+        step = step << 1;
+    }
+
+    // Now step down until we get a false result
+    step = step >> 1;
+    while (step > 0) {
+        if (startIdx + step < array.length && predFn(array[startIdx + step])) {
+            startIdx += step;
+        }
+        step = step >> 1;
+    }
+
+    return startIdx + 1;
+}
+
+
+export const sortTuple = (a: any, b: any): -1 | 0 | 1 => {
+    if (a === Unconstrained || b === Unconstrained) {
+        return 0
+    }
+
+    if (typeof a !== "object" && typeof b !== "object") {
+        return a < b ? -1 : a === b ? 0 : 1
+    }
+
+    if (a.length != b.length) {
+        throw new Error('Can\'t sort different sized tuples. Tuples are not the same length')
+    }
+
+    for (let index = 0; index < a.length; index++) {
+        const elementA = a[index];
+        const elementB = b[index];
+
+        if (elementA === Unconstrained || elementB === Unconstrained) {
+            continue
+        }
+
+        if (elementA === elementB) {
+            continue
+        }
+
+        if (Array.isArray(elementA)) {
+            return sortTuple(elementA, elementB)
+        }
+
+        if (typeof elementA == 'string') {
+            return elementA < elementB ? -1 : 1
+        }
+
+        return elementA < elementB ? -1 : 1
+    }
+
+    return 0
+};
+
 
 interface Leaper<P, V> {
     count: (prefix: P, isAntiFilterOnly?: boolean) => number
@@ -17,8 +85,6 @@ interface Leaper<P, V> {
     // Could be faster if we mutate vals
     intersect: (prefix: P, vals: Array<V>) => Array<V>
 }
-
-export const Unconstrained = DataFrog.Unconstrained as symbol
 
 type OutputKeys = Array<string | number | symbol>
 // Like extend but supports output tuples with unconstrained values that may be resolved by other leapers
@@ -62,10 +128,10 @@ export class ExtendWithUnconstrained<P, KName extends string | number | symbol, 
     count(prefix: P, isAntiFilterOnly?: boolean): number {
         const key = this.keyFunc(prefix)
         // First check if our first item is past the key. This means this row doesn't exist here
-        if (DataFrog.sortTuple(this.relation.elements[0].slice(0, key.length), key) === 1) {
+        if (sortTuple(this.relation.elements[0].slice(0, key.length), key) === 1) {
             this.startIdx = this.relation.elements.length
         } else {
-            this.startIdx = DataFrog.gallop(this.relation.elements, (row: any) => DataFrog.sortTuple(row.slice(0, key.length), key) === -1)
+            this.startIdx = gallop(this.relation.elements, (row: any) => sortTuple(row.slice(0, key.length), key) === -1)
         }
 
         if (DEBUG_LEVEL > 1) {
@@ -83,7 +149,7 @@ export class ExtendWithUnconstrained<P, KName extends string | number | symbol, 
             return 0
         }
 
-        this.endIdx = DataFrog.gallop(this.relation.elements, (row: any) => DataFrog.sortTuple(row.slice(0, key.length), key) === 0, this.startIdx)
+        this.endIdx = gallop(this.relation.elements, (row: any) => sortTuple(row.slice(0, key.length), key) === 0, this.startIdx)
         const count = this.endIdx - this.startIdx
         if (this.isAnti) {
             if (isAntiFilterOnly) {
@@ -136,7 +202,7 @@ export class ExtendWithUnconstrained<P, KName extends string | number | symbol, 
 
             // @ts-ignore
             const output = this._reshape(this.relation.elements[startIdx], keyLen)
-            const ordResult = DataFrog.sortTuple(output, val)
+            const ordResult = sortTuple(output, val)
 
             // No more results for this val
             if (ordResult > 0) {
@@ -150,9 +216,9 @@ export class ExtendWithUnconstrained<P, KName extends string | number | symbol, 
 
             const hasMatch = ordResult === 0
             if (!hasMatch) {
-                startIdx = DataFrog.gallop(this.relation.elements, (tuple: any) => {
+                startIdx = gallop(this.relation.elements, (tuple: any) => {
                     const output = this._reshape(tuple, keyLen)
-                    return DataFrog.sortTuple(output, val) === -1
+                    return sortTuple(output, val) === -1
                 }, startIdx)
                 continue
             }
@@ -341,7 +407,7 @@ export class RelationIndex<KName extends string | number | symbol, K, Val> {
             }
             return newRow
         }) as Array<[NewK, ...Array<ValueOf<NewVal>>]>
-        newData.sort((rowA, rowB) => DataFrog.sortTuple(rowA, rowB))
+        newData.sort((rowA, rowB) => sortTuple(rowA, rowB))
         return new RelationIndex(newData, newkeyOrdering)
     }
 
@@ -380,12 +446,12 @@ export class RelationIndex<KName extends string | number | symbol, K, Val> {
     }
 
     insertRow(newRow: [K, ...Array<ValueOf<Val>>], isRetraction: boolean = false) {
-        const insertIdx = DataFrog.gallop(this.elements, (row: any) => DataFrog.sortTuple(row, newRow) === -1)
+        const insertIdx = gallop(this.elements, (row: any) => sortTuple(row, newRow) === -1)
         // Check if this is a retraction and if we have a matching datum to retract.
         // If so, we will remove the positive match and clear the slate.
         if (isRetraction) {
             const nextDatum = this.elements[insertIdx]
-            if (nextDatum && !hasRetractionMeta(nextDatum) && DataFrog.sortTuple(nextDatum, newRow) === 0) {
+            if (nextDatum && !hasRetractionMeta(nextDatum) && sortTuple(nextDatum, newRow) === 0) {
                 // We have a match, remove nextDatum from our elements
                 this.elements.splice(insertIdx, 1)
                 return
@@ -751,11 +817,11 @@ Variable ${this.name}:
                 // Filter out elements we've already seen in our relation
                 // @ts-ignore
                 indexedToAdd.elements = indexedToAdd.elements.filter(elem => {
-                    let searchIdx = DataFrog.gallop(
+                    let searchIdx = gallop(
                         indexedStable.elements,
-                        (row: any) => DataFrog.sortTuple(row, elem) < 0);
+                        (row: any) => sortTuple(row, elem) < 0);
                     if (searchIdx < indexedStable.elements.length &&
-                        DataFrog.sortTuple(
+                        sortTuple(
                             indexedStable.elements[searchIdx], elem) === 0) {
                         // Check if this is a retraction, if so let it through
                         if (hasRetractionMeta(elem)) {
