@@ -1119,7 +1119,6 @@ describe.only("Implications", () => {
     test("Removing edges", () => {
         const Nodes = datalog.newTable({
             node: datalog.NumberType,
-            isConnectedTo: datalog.NumberType,
         })
 
         const Edges: datalog.Table<{ from: number, to: number }> = datalog.newTable({
@@ -1138,17 +1137,17 @@ describe.only("Implications", () => {
         })
 
         const initialNodesData = [
-            [1, 1],
+            [1],
         ]
-        initialNodesData.forEach(([node, isConnectedTo]) => {
-            Nodes.assert({ node, isConnectedTo })
+        initialNodesData.forEach(([node]) => {
+            Nodes.assert({ node })
         })
 
-        const Query = datalog.query(({ node, from, to, isAlsoConnectedTo }) => {
-            Nodes({ node, isConnectedTo: from })
-            Edges({ from, to })
-        }).implies(({ from, to }) => {
-            Nodes({ node: to, isConnectedTo: to })
+        const Query = datalog.query(({ node, to }) => {
+            Nodes({ node })
+            Edges({ from: node, to })
+        }).implies(({ to }) => {
+            Nodes({ node: to })
         })
 
         expect(Nodes.view().readAllData().map(({ node }) => node)).toEqual([
@@ -1163,5 +1162,4 @@ describe.only("Implications", () => {
             1, 2
         ])
     })
-
 })
