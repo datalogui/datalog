@@ -1116,4 +1116,52 @@ describe.only("Implications", () => {
         ])
     })
 
+    test("Removing edges", () => {
+        const Nodes = datalog.newTable({
+            node: datalog.NumberType,
+            isConnectedTo: datalog.NumberType,
+        })
+
+        const Edges: datalog.Table<{ from: number, to: number }> = datalog.newTable({
+            from: datalog.NumberType,
+            to: datalog.NumberType,
+        })
+
+        const initialEdgesData = [
+            [1, 2],
+            [2, 3],
+            [3, 4],
+            [4, 5]
+        ]
+        initialEdgesData.forEach(([from, to]) => {
+            Edges.assert({ from, to })
+        })
+
+        const initialNodesData = [
+            [1, 1],
+        ]
+        initialNodesData.forEach(([node, isConnectedTo]) => {
+            Nodes.assert({ node, isConnectedTo })
+        })
+
+        const Query = datalog.query(({ node, from, to, isAlsoConnectedTo }) => {
+            Nodes({ node, isConnectedTo: from })
+            Edges({ from, to })
+        }).implies(({ from, to }) => {
+            Nodes({ node: to, isConnectedTo: to })
+        })
+
+        expect(Nodes.view().readAllData().map(({ node }) => node)).toEqual([
+            1, 2, 3, 4, 5
+        ])
+
+        // We remove the edge from 2 to 3
+        Edges.retract({ from: 2, to: 3 })
+        Query.runQuery()
+
+        expect(Nodes.view().readAllData().map(({ node }) => node)).toEqual([
+            1, 2
+        ])
+    })
+
 })
