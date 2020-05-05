@@ -38,6 +38,33 @@ function gallop(array: Array<any>, predFn: (tuple: Array<any>) => boolean, start
     return startIdx + 1;
 }
 
+// Mutates the input array!
+// See https://doc.rust-lang.org/1.40.0/src/core/slice/mod.rs.html#1891 for a
+// great explanation of this algorithm.
+// Basically we bubble duplicates to the end of the array, then split the array
+// to before dupes and after dupes. O(n)
+// If the array is sorted, this will remove all duplicates.
+// comparatorFn should return true if the items are the same.
+function dedupBy<T>(array: Array<T>, comparatorFn: (a: T, b: T) => boolean) {
+    let w = 1
+    for (let r = 1; r < array.length; r++) {
+        const rElement = array[r];
+        const wElementPrev = array[w - 1];
+        if (comparatorFn(rElement, wElementPrev)) {
+            // The same so we keep `w` where it is
+        } else {
+            // We need to swap the elements
+            // But only swap if their indices are different (otherwise it's no-op)
+            if (r !== w) {
+                array[r] = array[w]
+                array[w] = rElement
+            }
+            w++
+        }
+    }
+    array.splice(w)
+}
+
 
 export const sortTuple = (a: any, b: any): -1 | 0 | 1 => {
     if (a === Unconstrained || b === Unconstrained) {
@@ -127,6 +154,10 @@ export class ExtendWithUnconstrained<P, KName extends string | number | symbol, 
      */
     count(prefix: P, isAntiFilterOnly?: boolean): number {
         const key = this.keyFunc(prefix)
+        if (this.relation.elements.length === 0) {
+            return 0
+        }
+
         // First check if our first item is past the key. This means this row doesn't exist here
         if (sortTuple(this.relation.elements[0].slice(0, key.length), key) === 1) {
             this.startIdx = this.relation.elements.length
@@ -394,6 +425,10 @@ export class RelationIndex<KName extends string | number | symbol, K, Val> {
         return cloned
     }
 
+    dedup() {
+        dedupBy(this.elements, (a, b) => sortTuple(a, b) === 0)
+    }
+
     indexBy<NewKName extends keyof Val | KName, NewK extends ValueOf<Val> | K, NewVal extends { [NewKeyName in KName | keyof Val]: ValueOf<Val> | K }>(newkeyOrdering: [NewKName, ...Array<keyof NewVal>]): RelationIndex<NewKName, NewK, NewVal> {
         const keyMapping = this.keyOrdering.reduce((acc: { [key: string]: number }, k, idx) => {
             acc[k as string] = idx
@@ -489,6 +524,9 @@ export class Relation<T> implements MultiIndexRelation<T>, Tell<T>, Retract<T> {
         return "[" + this.relations[0]?.elements.map(el => hasRetractionMeta(el) ? `RETRACTION: ${JSON.stringify(el)}` : JSON.stringify(el)).join(", ") + "]"
     }
 
+    dedup() {
+        this.relations.forEach(relation => relation.dedup())
+    }
 
     public get length(): number {
         if (this.relations.length === 0) {
@@ -751,8 +789,21 @@ Variable ${this.name}:
         this._subscribers.push(f)
     }
 
-    removeOnAssert(f: (v: T) => void) {
+    removeOnAssert(f: (v: T, isRetraction: boolean) => void) {
         this._subscribers = this._subscribers.filter(onAssertFn => f !== onAssertFn)
+    }
+
+    onChange(f: (v: T, isRetraction: boolean) => void) {
+        this.onAssert(f);
+        return () => { this.removeOnAssert(f) }
+    }
+
+    onChangeRecentDatum(f: (v: RecentDatum<T>) => void) {
+        const subscribeFn = (datum: T, isRetraction: boolean) => {
+            f({ datum, kind: isRetraction ? Removed : Added })
+        }
+        this.onAssert(subscribeFn);
+        return () => { this.removeOnAssert(subscribeFn) }
     }
 
     // recentChanges(): Generator<T>{
@@ -787,6 +838,7 @@ Variable ${this.name}:
                 const toAdd = this.toAdd[toAddIndex]
                 if (this.stable.relations.length === 0) {
                     // There is no relation, so let's just use the toAdd as our relation
+                    toAdd.dedup()
                     this.recent = toAdd
                     continue
                 }
@@ -1024,13 +1076,16 @@ interface AntiQueryable<T extends {}> {
     not(keyMap: Partial<T>): void
 }
 
-export interface TableView<T extends {}> {
+export interface View<T extends {}> {
     recentData(): null | Array<RecentDatum<T>>
     readAllData(): Array<T>
+    // Returns unsubscribe fn
+    onChange(subscriber: (t: T, isRetraction: boolean) => void): () => void
+    onChangeRecentDatum(subscriber: (recent: RecentDatum<T>) => void): () => void
 }
 
 interface Viewable<T extends {}> {
-    view(): TableView<T>
+    view(): View<T>
 }
 
 export interface Table<T extends {}> extends Tell<T>, Retract<T>, Queryable<T>, AntiQueryable<T>, Viewable<T> {
@@ -1038,7 +1093,12 @@ export interface Table<T extends {}> extends Tell<T>, Retract<T>, Queryable<T>, 
 
 type UnsubscribeFn = () => void
 export interface MaterializedTable<T extends {}> extends Queryable<T>, AntiQueryable<T>, Viewable<T> {
+    // Rerun the query to see the latest changes
     runQuery: () => void
+    /**
+    * Add implications to the query. This allows for recursion. The results of a query can feed back to the inputs of the query.
+    */
+    implies: (f: (datum: T) => void) => MaterializedTable<T>
     toString: () => string
     /**
      * Subscribe to when a dependency of this MaterializedTable has change.
@@ -1048,11 +1108,38 @@ export interface MaterializedTable<T extends {}> extends Queryable<T>, AntiQuery
     // queryVariables: null | Array<Variable<any>>
 }
 
+type PrivateMaterializeTableState = {}
 function newMaterializedTable<T>(v: Variable<T>, runQuery: () => void, onDependencyChange: (s: () => void) => UnsubscribeFn): MaterializedTable<T> {
     const outVar = new Variable<T>()
     const innerTable = _newTable(v, true)
-    const materializedTable = innerTable as unknown as MaterializedTable<T>
+    const materializedTable = innerTable as unknown as MaterializedTable<T> & PrivateMaterializeTableState
     materializedTable.runQuery = runQuery
+    materializedTable.implies = (f: (datum: T) => void) => {
+        const implicationView = materializedTable.view()
+        const implicationContext = new QueryContext()
+        // const scheduledRunQuery = false
+        const onRecentDatum = ({ kind, datum }: RecentDatum<T>) => {
+            queryContext = implicationContext
+            if (kind === Added) {
+                queryContext.implicationState = { isRetraction: false }
+                f(datum)
+            } else {
+                queryContext.implicationState = { isRetraction: true }
+                f(datum)
+            }
+            queryContext = emptyQueryContext
+
+            runQuery()
+            // if (!scheduledRunQuery) {
+            // runQuery()
+            // hmm should we schedule this to run on the next tick?
+            // setTimeout(() => runQuery(), 0)
+            // }
+        }
+        implicationView.onChangeRecentDatum(onRecentDatum)
+        implicationView.recentData()?.map(onRecentDatum);
+        return materializedTable
+    }
     materializedTable.onDependencyChange = onDependencyChange
     return materializedTable
 
@@ -1060,6 +1147,9 @@ function newMaterializedTable<T>(v: Variable<T>, runQuery: () => void, onDepende
 
 
 class QueryContext {
+    implicationState: null | {
+        isRetraction: boolean
+    } = null;
     variables: Array<any> = []
     remapKeys: Array<any> = []
     constants: Array<any> = []
@@ -1072,12 +1162,6 @@ class QueryContext {
         this.constants.push(constantVals)
     }
 
-    clear() {
-        this.variables = []
-        this.remapKeys = []
-        this.constants = []
-        this.antiVariablesIndices = new Set()
-    }
 }
 
 function fromEntries<V>(entries: Array<[string, V]>): Object {
@@ -1091,7 +1175,8 @@ function fromEntries<V>(entries: Array<[string, V]>): Object {
     return nonEmpty ? o : EmptyObj
 }
 
-let queryContext = new QueryContext()
+const emptyQueryContext = new QueryContext()
+let queryContext = emptyQueryContext
 /**
  * Returns a auto generated suffix key (for when a key needs to be defined, but isn't from the user)
  * @param keyName
@@ -1106,40 +1191,53 @@ function isAutoKey(k: string): boolean {
 
 
 // TODO these validators are not used
-type TypeValidator = { typeName: string, validate: (t: any) => boolean }
-type TableSchema<Keys extends string | number | symbol> = { [K in Keys]: TypeValidator }
-export function newTable<T extends {}>(schema: TableSchema<keyof T>): Table<T> {
+// type TypeValidator = { typeName: string, validate: (t: any) => boolean }
+type TypeValidator<T> = { typeName: string, validate: (t: any) => t is T }
+// type TableSchema<Keys extends string | number | symbol> = { [K in Keys]: TypeValidator }
+type TableSchema<T> = { [K in keyof T]: TypeValidator<T[K]> }
+export function newTable<T extends {}>(schema: TableSchema<T>): Table<T> {
     return _newTable(undefined, false, schema)
 }
 
 export const StringType = {
     typeName: 'string',
-    validate: (t: any) => typeof t === 'string'
+    validate: (t: any): t is string => typeof t === 'string'
 }
 
 export const NumberType = {
     typeName: 'number',
-    validate: (t: any) => typeof t === 'number'
+    validate: (t: any): t is number => typeof t === 'number'
 }
 
 export const BoolType = {
     typeName: 'boolean',
-    validate: (t: any) => typeof t === 'boolean'
+    validate: (t: any): t is boolean => typeof t === 'boolean'
 }
 
 export const ObjectType = {
     typeName: 'object',
-    validate: (t: any) => typeof t === 'object'
+    validate: (t: any): t is Object => typeof t === 'object'
 }
 
 export const ArrayType = {
     typeName: 'object',
-    validate: (t: any) => Array.isArray(t)
+    validate: (t: any): t is Array<any> => Array.isArray(t)
 }
 
-export function _newTable<T extends {}>(existingVar?: Variable<T>, isDerived?: boolean, schema?: TableSchema<keyof T>): Table<T> {
+export function _newTable<T extends {}>(existingVar?: Variable<T>, isDerived?: boolean, schema?: TableSchema<T>): Table<T> {
     const variable = existingVar || new Variable<T>()
     const table = (keymap: any) => {
+        // We are in an implication clause here, so the keymap is actually datum
+        if (!!queryContext.implicationState) {
+            const datum: T = keymap
+            if (queryContext.implicationState.isRetraction) {
+                variable.retract(datum)
+            } else {
+                variable.assert(datum)
+            }
+            return
+        }
+
         const constants = fromEntries(Object.entries(keymap).filter(([k, v]: any) => {
             if (typeof v === 'object' && v && 'ns' in v && v.ns === FreeVarNS) {
                 return false
@@ -1205,41 +1303,43 @@ const FreeVarGenerator: any = new Proxy({}, {
 
 export type SchemaOf<V> = V extends Table<infer T> ? T : never
 
-const EmptyObj = {}
+export const EmptyObj = {}
 
 export type QueryFn<Out> = (freeVars: Out) => void
 export function query<Out>(queryFn: QueryFn<Out>): MaterializedTable<Out> {
     queryContext = new QueryContext()
     // @ts-ignore – a trick
     queryFn(FreeVarGenerator)
+    const savedQueryContext = queryContext
+    queryContext = new QueryContext()
     // Split variables into parts
     const parts: any = [[]]
-    let keySetSeen = new Set(Object.values(queryContext.remapKeys[0]))
+    let keySetSeen = new Set(Object.values(savedQueryContext.remapKeys[0]))
     // Clone the variables so each query has it's own notions of stable/recent
-    let queryVariables = queryContext.variables.map((v: Variable<any>, i: number) => {
+    let queryVariables = savedQueryContext.variables.map((v: Variable<any>, i: number) => {
         const cloned = v.cloneAndTrack()
-        cloned.meta.isAnti = queryContext.antiVariablesIndices.has(i)
+        cloned.meta.isAnti = savedQueryContext.antiVariablesIndices.has(i)
         return cloned
     })
 
-    queryContext.remapKeys.forEach((remapKeys, i) => {
+    savedQueryContext.remapKeys.forEach((remapKeys, i) => {
         if (i === 0) {
-            return parts[0] = [[queryVariables[0]], [remapKeys], [queryContext.constants[0]]]
+            return parts[0] = [[queryVariables[0]], [remapKeys], [savedQueryContext.constants[0]]]
         }
 
         const lastPart = parts[parts.length - 1]
         const vals = Object.values(remapKeys)
         if (vals.some(k => keySetSeen.has(k))) {
             lastPart[0].push(queryVariables[i])
-            lastPart[1].push(queryContext.remapKeys[i])
-            lastPart[2].push(queryContext.constants[i])
+            lastPart[1].push(savedQueryContext.remapKeys[i])
+            lastPart[2].push(savedQueryContext.constants[i])
             vals.forEach(k => { keySetSeen.add(k) })
         } else {
             keySetSeen = new Set(vals)
             const newPart = [
                 [queryVariables[i]],
-                [queryContext.remapKeys[i]],
-                [queryContext.constants[i]]
+                [savedQueryContext.remapKeys[i]],
+                [savedQueryContext.constants[i]]
             ]
             parts.push(newPart)
         }
@@ -1248,7 +1348,9 @@ export function query<Out>(queryFn: QueryFn<Out>): MaterializedTable<Out> {
     // @ts-ignore
     const variableParts = parts.map(([variables, remapKeys, constants]) => {
         const outVar = new Variable()
-        const runInnerQuery = () => variableJoinHelper((join, isRetraction) => { isRetraction ? outVar.retract(join) : outVar.assert(join) }, variables, remapKeys, constants)
+        const runInnerQuery = () => {
+            variableJoinHelper((join, isRetraction) => { isRetraction ? outVar.retract(join) : outVar.assert(join) }, variables, remapKeys, constants)
+        }
         return [outVar, runInnerQuery]
     })
 

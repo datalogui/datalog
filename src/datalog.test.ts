@@ -244,6 +244,14 @@ describe("MultiIndexRelations", () => {
 })
 
 describe("Variables", () => {
+    test("Duplicates should not be in stable", () => {
+        const v = new datalog.Variable()
+        v.assert({ a: 1, b: 2 })
+        v.assert({ a: 1, b: 2 })
+        while (v.changed()) { }
+        expect(v.readAllData()).toEqual([{ a: 1, b: 2 }])
+    })
+
     test("Variables can be told stuff", () => {
         const A = new datalog.Variable<{ a: number, b: number }>()
         A.assert({ a: 1, b: 2 })
@@ -1067,4 +1075,45 @@ describe("Examples from docs", () => {
             }])
         })
     })
+})
+
+describe.only("Implications", () => {
+    test("Basic Recursion", () => {
+        const Nodes: datalog.Table<{ from: number, to: number }> = datalog.newTable({
+            from: datalog.NumberType,
+            to: datalog.NumberType,
+        })
+
+        const initialData = [
+            [1, 2],
+            [2, 3],
+            [3, 4],
+            [4, 5]
+        ]
+
+        initialData.forEach(([from, to]) => {
+            Nodes.assert({ from, to })
+        })
+
+        const Query = datalog.query(({ from, to, nextTo }) => {
+            Nodes({ from, to })
+            Nodes({ from: to, to: nextTo })
+        }).implies(({ from, nextTo }) => {
+            Nodes({ from, to: nextTo })
+        })
+
+        expect(Nodes.view().readAllData().map(({ from, to }) => [from, to])).toEqual([
+            [1, 2],
+            [1, 3],
+            [1, 4],
+            [1, 5],
+            [2, 3],
+            [2, 4],
+            [2, 5],
+            [3, 4],
+            [3, 5],
+            [4, 5],
+        ])
+    })
+
 })
