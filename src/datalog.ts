@@ -1406,3 +1406,11 @@ export function query<Out>(queryFn: QueryFn<Out>): MaterializedTable<Out> {
 
     return outMaterializedTable
 }
+
+export function intoTable<T>(data: Array<T>) {
+    const table = _newTable(undefined, false, undefined)
+    for (const datum of data) {
+        table.assert(datum)
+    }
+    return table
+}

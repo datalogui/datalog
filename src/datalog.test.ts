@@ -1077,7 +1077,7 @@ describe("Examples from docs", () => {
     })
 })
 
-describe.only("Implications", () => {
+describe("Implications", () => {
     test("Basic Recursion", () => {
         const Nodes: datalog.Table<{ from: number, to: number }> = datalog.newTable({
             from: datalog.NumberType,
@@ -1161,5 +1161,28 @@ describe.only("Implications", () => {
         expect(Nodes.view().readAllData().map(({ node }) => node)).toEqual([
             1, 2
         ])
+    })
+})
+
+describe("Into Table", () => {
+    test("Should be able turn an array of objects into a table", () => {
+        const People = datalog.intoTable([
+            { name: "Alice" },
+            { name: "Bob" },
+            { name: "Carol" },
+        ])
+
+        const Parents = datalog.intoTable([
+            { parent: "Alice", child: "Carol" }
+        ])
+
+        // Find parents
+        expect(
+            datalog.query(({ parent, child }) => {
+                People({ name: parent })
+                Parents({ parent, child })
+            }).view().readAllData().map(({ parent }) => parent)
+        ).toEqual(["Alice"])
+
     })
 })
