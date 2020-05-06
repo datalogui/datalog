@@ -1408,7 +1408,7 @@ export function query<Out>(queryFn: QueryFn<Out>): MaterializedTable<Out> {
 }
 
 export function intoTable<T>(data: Array<T>) {
-    const table = _newTable(undefined, false, undefined)
+    const table = _newTable<T>(undefined, false, undefined)
     for (const datum of data) {
         table.assert(datum)
     }
