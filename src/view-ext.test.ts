@@ -2,12 +2,6 @@ import * as datalog from './datalog'
 import { Added, Modified, Removed } from './datalog'
 import * as ViewExt from './view-ext'
 
-describe("dummy", () => {
-  test("dummy", () => {
-    expect(true).toBe(true)
-  })
-})
-
 describe("Map", () => {
   test("maps simple values", () => {
     const table = datalog.intoTable([
@@ -102,16 +96,6 @@ describe("SortBy", () => {
     expect(sortedView.recentData()).toEqual(
       [
         { kind: Added, datum: { index: 3, datum: { n: 3 } } },
-        {
-          kind: Modified,
-          datum: { index: 4, datum: { n: 5 } },
-          oldDatum: { index: 3, datum: { n: 5 } }
-        },
-        {
-          kind: Modified,
-          datum: { index: 5, datum: { n: 6 } },
-          oldDatum: { index: 4, datum: { n: 6 } }
-        }
       ]
     )
 
@@ -119,21 +103,6 @@ describe("SortBy", () => {
     expect(sortedView.recentData()).toEqual(
       [
         { kind: Removed, datum: { index: 2, datum: { n: 2 } } },
-        {
-          kind: Modified,
-          datum: { index: 2, datum: { n: 3 } },
-          oldDatum: { index: 3, datum: { n: 3 } }
-        },
-        {
-          kind: Modified,
-          datum: { index: 3, datum: { n: 5 } },
-          oldDatum: { index: 4, datum: { n: 5 } }
-        },
-        {
-          kind: Modified,
-          datum: { index: 4, datum: { n: 6 } },
-          oldDatum: { index: 5, datum: { n: 6 } }
-        }
       ]
     )
   })

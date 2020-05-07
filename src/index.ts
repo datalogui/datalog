@@ -1,4 +1,5 @@
 export {
+  Added,
   ArrayType,
   BoolType,
   MaterializedTable,
@@ -7,6 +8,7 @@ export {
   ObjectType,
   QueryFn,
   RecentDatum,
+  Removed,
   StringType,
   Table,
   View,
@@ -14,3 +16,12 @@ export {
   newTable,
   query,
 } from './datalog'
+
+export {
+  Impl,
+  Indexed,
+  IndexedImpl,
+  IndexedViewExt,
+  SingleItemView,
+  ViewExt,
+} from './view-ext'

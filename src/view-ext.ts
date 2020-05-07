@@ -7,9 +7,9 @@ import * as datalog from './datalog'
  */
 type EffectFn<T> = (t: RecentDatum<T>) => void
 
-type Indexed<T> = { index: number, datum: T }
+export type Indexed<T> = { index: number, datum: T }
 
-interface ViewExt<T> extends datalog.View<T> {
+export interface ViewExt<T> extends datalog.View<T> {
   map<O>(f: (t: T) => O): ViewExt<O>;
   mapEffect<F extends EffectFn<T>>(f: F): void;
 
@@ -19,21 +19,22 @@ interface ViewExt<T> extends datalog.View<T> {
   orderBy(key: keyof T, ascending?: boolean): IndexedViewExt<T>
 }
 
-interface IndexedViewExt<T> extends ViewExt<Indexed<T>> {
+export interface IndexedViewExt<T> extends ViewExt<Indexed<T>> {
   take(n: number): IndexedViewExt<T> & ViewExt<Indexed<T>>
   drop(n: number): IndexedViewExt<T> & ViewExt<Indexed<T>>
+  mapIndexed<O>(f: (t: T) => O): IndexedViewExt<O>
 }
 
-class SingleItemView<T> implements datalog.View<T> {
-  lastValSincePoll: T
+export class SingleItemView<T> implements datalog.View<T> {
+  lastValSincePoll: T | null
   currentVal: T
   subscribers: Array<() => void> = []
   newDatumSubscribers: Array<(d: RecentDatum<T>) => void> = []
-  modifiedSinceLastPolled = false
+  modifiedSinceLastPolled = true
 
   constructor(initialVal: T) {
     this.currentVal = initialVal
-    this.lastValSincePoll = initialVal
+    this.lastValSincePoll = null
   }
 
   copy(): View<T> {
@@ -45,9 +46,9 @@ class SingleItemView<T> implements datalog.View<T> {
 
   _setValue(v: T) {
     this.modifiedSinceLastPolled = true
-    this.subscribers.map(s => s())
     this.currentVal = v
-    this.newDatumSubscribers.forEach(subscriber => subscriber({ kind: datalog.Modified, datum: v, oldDatum: this.lastValSincePoll }))
+    this.newDatumSubscribers.forEach(subscriber => subscriber({ kind: datalog.Modified, datum: v, oldDatum: this.lastValSincePoll! }))
+    this.subscribers.map(s => s())
   }
 
   recentData(): null | Array<RecentDatum<T>> {
@@ -56,6 +57,9 @@ class SingleItemView<T> implements datalog.View<T> {
     // Reset vals
     this.modifiedSinceLastPolled = false
     this.lastValSincePoll = this.currentVal
+    if (lastVal === null) {
+      return [{ kind: datalog.Added, datum: this.currentVal }]
+    }
 
     return modifiedSinceLastPolled ? [{ kind: datalog.Modified, datum: this.currentVal, oldDatum: lastVal }] : null
   }
@@ -81,6 +85,86 @@ function isPlainObj(o: any): boolean {
   return typeof o == 'object' && o.constructor == Object;
 }
 
+class MappedIndexedView<T, O> implements View<Indexed<O>> {
+  innerView: View<Indexed<T>>
+  // innerArray: Array<T> = []
+  changes: Array<RecentDatum<Indexed<O>>> = []
+  subscribers: Array<() => void> = []
+  newDatumSubscribers: Array<(d: RecentDatum<Indexed<O>>) => void> = []
+  mapFn: (t: T) => O
+
+  constructor(fromView: View<Indexed<T>>, mapFn: (t: T) => O) {
+    this.innerView = fromView
+    this.mapFn = mapFn
+    // this.innerArray = this.innerView.readAllData()
+    this.changes = this.innerView.readAllData().map((d) => ({ kind: datalog.Added, datum: { index: d.index, datum: mapFn(d.datum) } }))
+
+    const onChange = (recentDatum: RecentDatum<Indexed<T>>) => {
+      const scopeChanges: Array<RecentDatum<Indexed<O>>> = []
+
+      switch (recentDatum.kind) {
+        case datalog.Added:
+          scopeChanges.push({ kind: datalog.Added, datum: { index: recentDatum.datum.index, datum: mapFn(recentDatum.datum.datum) } })
+          break;
+        case datalog.Removed:
+          scopeChanges.push({ kind: datalog.Removed, datum: { index: recentDatum.datum.index, datum: mapFn(recentDatum.datum.datum) } })
+          break;
+        case datalog.Modified:
+          scopeChanges.push({ kind: datalog.Modified, datum: { index: recentDatum.datum.index, datum: mapFn(recentDatum.datum.datum) }, oldDatum: { index: recentDatum.oldDatum.index, datum: mapFn(recentDatum.oldDatum.datum) } })
+          break;
+      }
+
+      this.changes = this.changes.concat(scopeChanges)
+      this.newDatumSubscribers.forEach(subscriber => {
+        scopeChanges.forEach(change => subscriber(change))
+      })
+      this.subscribers.forEach(subscriber => {
+        subscriber()
+      })
+    }
+
+    this.innerView.onChange(() => {
+      const recentData = this.innerView.recentData()
+      recentData?.map(onChange)
+    })
+  }
+
+  recentData() {
+    if (this.changes.length > 0) {
+      const recentChanges = this.changes
+      this.changes = []
+      return recentChanges
+    }
+    return null
+  }
+
+  readAllData() {
+    this.changes = []
+    return this.innerView.readAllData().map(({ index, datum }) => ({ index, datum: this.mapFn(datum) }))
+  }
+
+  onChange(f: () => void) {
+    this.subscribers.push(f)
+    return () => { this.subscribers = this.subscribers.filter(s => s !== f) }
+  }
+
+  onNewDatum(f: (d: RecentDatum<Indexed<O>>) => void) {
+    this.newDatumSubscribers.push(f)
+    return () => {
+      this.newDatumSubscribers = this.newDatumSubscribers.filter(subscriber => {
+        subscriber !== f
+      })
+    }
+  }
+
+  copy() {
+    const copied = new MappedIndexedView(this.innerView, this.mapFn)
+    return copied
+  }
+}
+
+
+
 class SortedView<T> implements View<Indexed<T>> {
   innerView: View<T>
   sorted: Array<T> = []
@@ -92,6 +176,7 @@ class SortedView<T> implements View<Indexed<T>> {
   constructor(fromView: View<T>, sortFn: (a: T, b: T) => -1 | 0 | 1) {
     this.innerView = fromView
     this.sorted = this.innerView.readAllData().sort(sortFn)
+    this.changes = this.sorted.map((datum, i) => ({ kind: datalog.Added, datum: { index: i, datum } }))
     this.sortFn = sortFn
 
     const onChange = ({ kind, datum }: RecentDatum<T>) => {
@@ -115,13 +200,17 @@ class SortedView<T> implements View<Indexed<T>> {
           const positionToInsert = datalog.gallop(this.sorted, (d) => sortFn(d, datum) === -1)
           this.sorted.splice(positionToInsert, 0, datum)
           scopeChanges.push({ kind: datalog.Added, datum: { index: positionToInsert, datum } })
-          for (let i = positionToInsert + 1; i < this.sorted.length; i++) {
-            scopeChanges.push({
-              kind: datalog.Modified,
-              datum: { index: i, datum: this.sorted[i] },
-              oldDatum: { index: i - 1, datum: this.sorted[i] }
-            })
-          }
+
+          // This will push Modified changes on index positions, but it's not
+          // needed. Since callers will end up with the same thing if they just
+          // follow the Added/Removed
+          // for (let i = positionToInsert + 1; i < this.sorted.length; i++) {
+          //   scopeChanges.push({
+          //     kind: datalog.Modified,
+          //     datum: { index: i, datum: this.sorted[i] },
+          //     oldDatum: { index: i - 1, datum: this.sorted[i] }
+          //   })
+          // }
           break;
         case datalog.Removed:
           // A new datum was removed, let's find out where it was in the list
@@ -134,13 +223,16 @@ class SortedView<T> implements View<Indexed<T>> {
           this.sorted.splice(positionToRemove, 1)
           scopeChanges.push({ kind: datalog.Removed, datum: { index: positionToRemove, datum } })
 
-          for (let i = positionToRemove; i < this.sorted.length; i++) {
-            scopeChanges.push({
-              kind: datalog.Modified,
-              datum: { index: i, datum: this.sorted[i] },
-              oldDatum: { index: i + 1, datum: this.sorted[i] }
-            })
-          }
+          // This will push Modified changes on index positions, but it's not
+          // needed. Since callers will end up with the same thing if they just
+          // follow the Added/Removed
+          // for (let i = positionToRemove; i < this.sorted.length; i++) {
+          //   scopeChanges.push({
+          //     kind: datalog.Modified,
+          //     datum: { index: i, datum: this.sorted[i] },
+          //     oldDatum: { index: i + 1, datum: this.sorted[i] }
+          //   })
+          // }
           break;
         case datalog.Modified:
           throw new Error("Not implemented! – Modification datum on indexed View")
@@ -149,19 +241,23 @@ class SortedView<T> implements View<Indexed<T>> {
         // modified... (old value)
       }
 
+      this.changes = this.changes.concat(scopeChanges)
       this.newDatumSubscribers.forEach(subscriber => {
         scopeChanges.forEach(change => subscriber(change))
       })
-      this.changes = this.changes.concat(scopeChanges)
+      this.subscribers.forEach(subscriber => {
+        subscriber()
+      })
     }
 
     this.innerView.onChange(() => {
-      this.innerView.recentData()?.map(onChange)
+      // this.innerView.recentData()?.map(onChange)
+      const recentData = this.innerView.recentData()
+      recentData?.map(onChange)
     })
-    this.innerView.recentData()?.map(onChange)
+    // this.innerView.recentData()?.map(onChange)
 
 
-    let subscribers: Array<() => void> = []
 
 
   }
@@ -175,6 +271,7 @@ class SortedView<T> implements View<Indexed<T>> {
   }
 
   readAllData() {
+    this.changes = []
     return this.sorted.map((datum, index) => ({ index, datum }))
   }
 
@@ -334,6 +431,10 @@ export class IndexedImpl<T> implements IndexedViewExt<T> {
 
   map<O>(f: (t: Indexed<T>) => O): ViewExt<O> {
     return this.innerView.map(f)
+  }
+
+  mapIndexed<O>(f: (t: T) => O): IndexedViewExt<O> {
+    return new IndexedImpl(new MappedIndexedView(this.innerView, f))
   }
 
   mapEffect<F extends EffectFn<Indexed<T>>>(f: F): void {

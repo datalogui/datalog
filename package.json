@@ -8,7 +8,8 @@
     "dist/index.js",
     "dist/datalog.js",
     "dist/datalog.d.ts",
-    "dist/datafrog-js/index.js"
+    "dist/view-ext.js",
+    "dist/view-ext.d.ts"
   ],
   "devDependencies": {
     "@babel/core": "^7.8.6",
@@ -32,5 +33,6 @@
       "/node_modules/",
       "/dist/"
     ]
-  }
+  },
+  "dependencies": {}
 }
