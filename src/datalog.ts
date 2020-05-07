@@ -10,10 +10,15 @@ const DEBUG_LEVEL = 0
 
 
 
-// Finds the first index for which predicate is false. Returns an index of
-// array.length if it will never be false
-// predFn takes the form of (tuple) => boolean
-function gallop(array: Array<any>, predFn: (tuple: Array<any>) => boolean, startIdx = 0): number {
+/**
+ *  Finds the first index for which predicate is false. Returns an index of
+ *  array.length if it will never be false
+ *  predFn takes the form of (tuple) => boolean
+ * @param array
+ * @param predFnx
+ * @param startIdx
+ */
+export function gallop<T>(array: Array<T>, predFn: (tuple: T) => boolean, startIdx = 0): number {
     if (array.length - startIdx <= 0 || !predFn(array[startIdx])) {
         return startIdx;
     }
@@ -658,10 +663,15 @@ export class Relation<T> implements MultiIndexRelation<T>, Tell<T>, Retract<T> {
 
 export const Added = Symbol("DatumAdded")
 export const Removed = Symbol("DatumRemoved")
+export const Modified = Symbol("DatumModified")
 
 export type RecentDatum<T> = {
     kind: typeof Added | typeof Removed
     datum: T
+} | {
+    kind: typeof Modified
+    datum: T
+    oldDatum: T
 }
 
 export class Variable<T> implements Tell<T>, Retract<T> {
@@ -793,14 +803,16 @@ Variable ${this.name}:
         this._subscribers = this._subscribers.filter(onAssertFn => f !== onAssertFn)
     }
 
-    onChange(f: (v: T, isRetraction: boolean) => void) {
-        this.onAssert(f);
-        return () => { this.removeOnAssert(f) }
-    }
-
-    onChangeRecentDatum(f: (v: RecentDatum<T>) => void) {
+    onChange(f: () => void) {
         const subscribeFn = (datum: T, isRetraction: boolean) => {
-            f({ datum, kind: isRetraction ? Removed : Added })
+            f()
+        }
+        this.onAssert(subscribeFn);
+        return () => { this.removeOnAssert(subscribeFn) }
+    }
+    onNewDatum(f: (d: RecentDatum<T>) => void) {
+        const subscribeFn = (datum: T, isRetraction: boolean) => {
+            f({ kind: isRetraction ? Removed : Added, datum })
         }
         this.onAssert(subscribeFn);
         return () => { this.removeOnAssert(subscribeFn) }
@@ -1080,8 +1092,11 @@ export interface View<T extends {}> {
     recentData(): null | Array<RecentDatum<T>>
     readAllData(): Array<T>
     // Returns unsubscribe fn
-    onChange(subscriber: (t: T, isRetraction: boolean) => void): () => void
-    onChangeRecentDatum(subscriber: (recent: RecentDatum<T>) => void): () => void
+    onChange(subscriber: () => void): () => void
+    // Returns unsubscribe fn. Doesn't affect recentData calls
+    onNewDatum(subscriber: (datum: RecentDatum<T>) => void): () => void
+    // Clones recentData view state, but should preserve pointer to original data
+    copy(): View<T>
 }
 
 interface Viewable<T extends {}> {
@@ -1136,7 +1151,9 @@ function newMaterializedTable<T>(v: Variable<T>, runQuery: () => void, onDepende
             // setTimeout(() => runQuery(), 0)
             // }
         }
-        implicationView.onChangeRecentDatum(onRecentDatum)
+        implicationView.onChange(() => {
+            implicationView.recentData()?.map(onRecentDatum);
+        })
         implicationView.recentData()?.map(onRecentDatum);
         return materializedTable
     }
@@ -1280,12 +1297,13 @@ export function _newTable<T extends {}>(existingVar?: Variable<T>, isDerived?: b
     }
 
     // table.clone = () => variable.clone()
-    table.view = () => {
+    table.view = (): View<T> => {
         // It would be nice to use something like a weakref here
         // TODO: This is a potential source of memory leaks since the view can never
         // be reclaimed unless the table also gets reclaimed.
-        let cloned = variable.cloneAndTrack()
-
+        let cloned = variable.cloneAndTrack() as unknown as View<T>
+        const copyFn = () => { const cloned = variable.cloneAndTrack() as unknown as View<T>; cloned.copy = copyFn; return cloned }
+        cloned.copy = copyFn
         return cloned
     }
 
