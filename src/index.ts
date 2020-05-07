@@ -2,6 +2,7 @@ export {
   ArrayType,
   BoolType,
   MaterializedTable,
+  Modified,
   NumberType,
   ObjectType,
   QueryFn,
