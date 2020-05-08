@@ -236,9 +236,12 @@ export class ExtendWithUnconstrained<P, KName extends string | number | symbol, 
         let valIndex = 0
         while (valIndex < vals.length && startIdx < this.endIdx) {
             const val = vals[valIndex]
+            // If the input was a retraction it should taint the derived values
+            const valIsRetraction = hasRetractionMeta(val)
 
             // @ts-ignore
             const output = this._reshape(this.relation.elements[startIdx], keyLen)
+            const outputisRetraction = hasRetractionMeta(output)
             const ordResult = sortTuple(output, val)
 
             // No more results for this val
@@ -299,6 +302,9 @@ export class ExtendWithUnconstrained<P, KName extends string | number | symbol, 
                 })
 
                 if (filledInUnconstrained) {
+                    if (valIsRetraction || outputisRetraction) {
+                        setRetractionMeta(filledInUnconstrained, true)
+                    }
                     out.push(filledInUnconstrained)
                     continue
                 }

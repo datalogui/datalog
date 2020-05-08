@@ -1,5 +1,5 @@
 import * as datalog from './datalog'
-import { SingleItemView } from './view-ext'
+import { SingleItemView, IndexedImpl } from './view-ext'
 
 function intoAddedDatums<T>(v: Array<T>): Array<datalog.RecentDatum<T>> {
     return v.map(datum => ({ kind: datalog.Added, datum }))
@@ -938,7 +938,7 @@ describe("Reading Data", () => {
     })
 })
 
-describe("Examples from docs", () => {
+describe.only("Examples from docs", () => {
     test("Simple Retraction implication", () => {
         const A = datalog.intoTable([{ a: 1, b: 2 }])
         const B = datalog.intoTable([
@@ -960,7 +960,7 @@ describe("Examples from docs", () => {
 
         expect(A.view().readAllData()).toEqual([])
     })
-    test("Home page demo", () => {
+    test.only("Home page demo", () => {
         const InMovie = datalog.intoTable([
             { MovieName: "Change of Habit", Actor: "Elvis Presley" },
             { MovieName: "Foo", Actor: "A" },
@@ -977,39 +977,140 @@ describe("Examples from docs", () => {
             { Actor: "Kevin Bacon", number: 0 },
         ])
 
-        const BaconNumberQuery = datalog.query<{ BaconNumber: number, Actor: string, NextActor: string, MovieName: string }>(({ BaconNumber, Actor, NextActor, MovieName }) => {
-            InMovie({ Actor, MovieName })
-            InMovie({ MovieName, Actor: NextActor })
-            BaconNumbers({ Actor, number: BaconNumber })
-            BaconNumbers.not({ Actor: NextActor })
+        datalog.query<{ BaconNumber: number, Actor: string, NextActor: string, MovieName: string }>(({ BaconNumber, Actor, NextActor, MovieName }) => {
+            InMovie({ Actor })
+            BaconNumbers.not({ Actor })
+        }).view().readAllData().map(({ Actor }) => {
+            BaconNumbers.assert({ Actor, number: Infinity })
         })
 
-        BaconNumberQuery.viewExt().reduce((acc: { [key: string]: number }, { kind, datum }) => {
-            const currentBaconNumber = acc[datum.NextActor]
-            if (kind === datalog.Added && (!currentBaconNumber || currentBaconNumber > datum.BaconNumber + 1)) {
-                return { ...acc, [datum.NextActor]: datum.BaconNumber + 1 }
-            } else if (kind === datalog.Removed && acc[datum.NextActor] === datum.BaconNumber + 1) {
-                const next = { ...acc }
-                delete next[datum.NextActor]
-                return next
-            }
-            return acc
-        }, {}).mapEffect((recentDatum) => {
-            if (recentDatum.kind === datalog.Added) {
-                Object.keys(recentDatum.datum).forEach(Actor => {
-                    BaconNumbers.assert({ Actor, number: recentDatum.datum[Actor] })
-                })
-                BaconNumberQuery.runQuery()
-            } else if (recentDatum.kind === datalog.Modified) {
-                Object.keys(recentDatum.oldDatum).forEach(Actor => {
-                    BaconNumbers.retract({ Actor, number: recentDatum.oldDatum[Actor] })
-                })
-                Object.keys(recentDatum.datum).forEach(Actor => {
-                    BaconNumbers.assert({ Actor, number: recentDatum.datum[Actor] })
-                })
-                BaconNumberQuery.runQuery()
-            }
+
+        const BaconNumberQuery = datalog.query<{ BaconNumber: number, Actor: string, NextActor: string, CurrentBaconNumber: number, MovieName: string }>(({ BaconNumber, Actor, NextActor, CurrentBaconNumber, MovieName }) => {
+            BaconNumbers({ Actor, number: BaconNumber })
+            InMovie({ Actor, MovieName })
+            InMovie({ MovieName, Actor: NextActor })
+            BaconNumbers({ Actor: NextActor, number: CurrentBaconNumber })
+            BaconNumbers.not({ Actor: Actor, number: Infinity })
+            // BaconNumbers.not({ Actor: NextActor })
         })
+
+        // const firstResult = BaconNumberQuery.view().readAllData()
+        // console.log("First Query Result:", firstResult)
+        // console.log("BaconNumbers:", BaconNumbers.view().toString())
+        // BaconNumbers.retract({ Actor: "Edward Asner", number: Infinity })
+        // BaconNumberQuery.runQuery()
+        // expect(BaconNumberQuery.view().readAllData()).not.toContainEqual({
+        //     Actor: 'Edward Asner',
+        //     NextActor: 'Elvis Presley',
+        //     MovieName: 'Change of Habit',
+        //     BaconNumber: Infinity,
+        //     CurrentBaconNumber: Infinity
+        // })
+
+        // BaconNumbers.assert({ Actor: "Edward Asner", number: 1 })
+        // BaconNumberQuery.runQuery()
+        // const secondResult = BaconNumberQuery.view().readAllData()
+        // expect(secondResult).toContainEqual({
+        //     Actor: 'Edward Asner',
+        //     NextActor: 'Elvis Presley',
+        //     MovieName: 'Change of Habit',
+        //     BaconNumber: 1,
+        //     CurrentBaconNumber: Infinity
+        // })
+
+        // console.log("BaconNumbers:", BaconNumbers.view().toString())
+        // // BaconNumberQuery.runQuery()
+        // console.log("Second Query Result:", secondResult)
+        // console.log("Second Query Result:", BaconNumberQuery.view().toString())
+        // console.log("BaconNumbers:", BaconNumbers.view().readAllData())
+
+        // return
+
+        let changed = false
+        BaconNumberQuery.viewExt()
+            // .reduce((acc: { [key: string]: number }, { kind, datum }) => {
+            //     const currentBaconNumber = acc[datum.NextActor]
+            //     if (kind === datalog.Added && (!currentBaconNumber || currentBaconNumber > datum.BaconNumber + 1)) {
+            //         return { ...acc, [datum.NextActor]: datum.BaconNumber + 1 }
+            //     } else if (kind === datalog.Removed && acc[datum.NextActor] === datum.BaconNumber + 1) {
+            //         // If we are removing a datum, we should make sure the datum we
+            //         // remove from acc is the same one referenced in datum. That's
+            //         // the `acc[datum.NextActor] === datum.BaconNumber + 1` check.
+            //         const next = { ...acc }
+            //         delete next[datum.NextActor]
+            //         return next
+            //     }
+            //     return acc
+            // }, {})
+            .mapEffect((recentDatum) => {
+                // console.log("Kind:", recentDatum.kind)
+                console.log("Recent Datum is", recentDatum)
+                switch (recentDatum.kind) {
+                    case datalog.Added:
+                        {
+                            if (recentDatum.datum.Actor === recentDatum.datum.NextActor) {
+                                break
+                            }
+                            const { NextActor: Actor, BaconNumber, CurrentBaconNumber } = recentDatum.datum
+                            // console.log("New Datum: ", Actor, BaconNumber, CurrentBaconNumber)
+                            if (CurrentBaconNumber > BaconNumber + 1) {
+                                console.log("Swapping: ", Actor, CurrentBaconNumber)
+                                console.log("With: ", Actor, BaconNumber + 1)
+                                BaconNumbers.retract({ Actor, number: CurrentBaconNumber })
+                                BaconNumbers.assert({ Actor, number: BaconNumber + 1 })
+                            }
+                        }
+                        // Object.keys(recentDatum.datum).forEach(Actor => {
+                        //     BaconNumbers.assert({ Actor, number: recentDatum.datum[BaconNumber] + 1 })
+                        // })
+                        break
+                    case datalog.Removed:
+                        if (recentDatum.datum.Actor === recentDatum.datum.NextActor) {
+                            break
+                        }
+                        {
+                            const { NextActor: Actor, BaconNumber, CurrentBaconNumber } = recentDatum.datum
+                            if (CurrentBaconNumber === BaconNumber + 1) {
+                                console.log("Removing: ", Actor, BaconNumber, CurrentBaconNumber)
+                                BaconNumbers.retract({ Actor, number: BaconNumber + 1 })
+                            } else {
+                                console.log("Not Removing: ", Actor, BaconNumber, CurrentBaconNumber)
+                            }
+                        }
+                        // Object.keys(recentDatum.datum).forEach(Actor => {
+                        //     BaconNumbers.retract({ Actor, number: recentDatum.datum[Actor] })
+                        // })
+                        break
+                    case datalog.Modified:
+                        throw new Error("Unexpected")
+                        // const {NextActor: Actor, BaconNumber} = recentDatum.datum
+                        // const {: Actor, BaconNumber} = recentDatum.datum
+                        // BaconNumbers.assert({ Actor, number: BaconNumber + 1})
+                        // BaconNumbers.assert({ Actor, number: BaconNumber + 1})
+                        // Object.keys(recentDatum.oldDatum).forEach(Actor => {
+                        //     BaconNumbers.retract({ Actor, number: recentDatum.oldDatum[Actor] })
+                        // })
+                        // Object.keys(recentDatum.datum).forEach(Actor => {
+                        //     BaconNumbers.assert({ Actor, number: recentDatum.datum[Actor] })
+                        // })
+                        break
+                }
+                // We modified one of the inputs to the query, so we should rerun
+                // the query
+                // This can be taken outside of this effect function if you want
+                // more control over when querying work happens.
+                console.log("Bacon Numbers: ", BaconNumbers.view().toString())
+                // BaconNumberQuery.runQuery()
+                changed = true
+            })
+
+        while (changed) {
+            changed = false
+            BaconNumberQuery.runQuery()
+        }
+        console.log("Query:", BaconNumberQuery.toString())
+        console.log("Query:", BaconNumberQuery.view().readAllData())
+        console.log("Bacon Numbers: ", BaconNumbers.view().toString())
         expect(BaconNumbers.view().readAllData()).toEqual([
             { Actor: "A", number: 3 },
             { Actor: "B", number: 2 },
