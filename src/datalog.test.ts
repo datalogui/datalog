@@ -1,30 +1,11 @@
 import * as datalog from './datalog'
+import { SingleItemView } from './view-ext'
 
 function intoAddedDatums<T>(v: Array<T>): Array<datalog.RecentDatum<T>> {
     return v.map(datum => ({ kind: datalog.Added, datum }))
 }
 
 type PersonID = number
-
-describe.skip("Playground", () => {
-    test("Generators", () => {
-        console.log('here')
-        function count(n: number, cb: (i: number) => void) {
-            for (let i = 0; i < n; i++) {
-                cb(i)
-            }
-        }
-
-        function countGen(n: number): Iterable<number> {
-            const out: any = [];
-            count(n, i => out.push(i))
-            return out[Symbol.iterator]()
-        }
-
-        console.log(count(10, (n) => console.log(n)))
-        console.log([...countGen(10)])
-    })
-})
 
 describe('Relation', () => {
     const newPerson = () => new datalog.RelationIndex<"id", PersonID, { name: string }>([], ["id", "name"])
@@ -817,6 +798,22 @@ describe("Retractions", () => {
         ]))
     })
 
+    test("Retractions in Variable's toAdd cancel each other out", () => {
+        const v = new datalog.Variable()
+        v.assert({ a: "1", b: 1 })
+        while (v.changed()) { }
+        expect(v.readAllData()).toEqual([
+            { a: "1", b: 1 }
+        ])
+        v.retract({ a: "1", b: 1 })
+        v.assert({ a: "1", b: 1 })
+        expect(v.readAllData()).toEqual([
+            { a: "1", b: 1 }
+        ])
+
+
+    })
+
     test("Relations get updated", () => {
         type ID = number
         const People = datalog._newTable<{ name: string, id: ID }>()
@@ -942,6 +939,87 @@ describe("Reading Data", () => {
 })
 
 describe("Examples from docs", () => {
+    test("Simple Retraction implication", () => {
+        const A = datalog.intoTable([{ a: 1, b: 2 }])
+        const B = datalog.intoTable([
+            { b: 2, c: 3, },
+            { b: 2, c: 4 }
+        ])
+
+        const retractedState = {}
+        datalog.query(({ a, b, c }) => {
+            A({ a, b })
+            B({ b, c })
+        }).implies(({ a, b }, kind) => {
+            if (kind === datalog.Added && !(retractedState[a]?.[b])) {
+                retractedState[a] = retractedState[a] || {}
+                retractedState[a][b] = true
+                A.retract({ a, b })
+            }
+        })
+
+        expect(A.view().readAllData()).toEqual([])
+    })
+    test("Home page demo", () => {
+        const InMovie = datalog.intoTable([
+            { MovieName: "Change of Habit", Actor: "Elvis Presley" },
+            { MovieName: "Foo", Actor: "A" },
+            { MovieName: "Foo", Actor: "B" },
+            { MovieName: "Bar", Actor: "B" },
+            { MovieName: "Bar", Actor: "C" },
+            { MovieName: "JFK", Actor: "C" },
+            { MovieName: "Change of Habit", Actor: "Edward Asner" },
+            { MovieName: "JFK", Actor: "Edward Asner" },
+            { MovieName: "JFK", Actor: "Kevin Bacon" },
+            // ... More Movies
+        ])
+        const BaconNumbers = datalog.intoTable([
+            { Actor: "Kevin Bacon", number: 0 },
+        ])
+
+        const BaconNumberQuery = datalog.query<{ BaconNumber: number, Actor: string, NextActor: string, MovieName: string }>(({ BaconNumber, Actor, NextActor, MovieName }) => {
+            InMovie({ Actor, MovieName })
+            InMovie({ MovieName, Actor: NextActor })
+            BaconNumbers({ Actor, number: BaconNumber })
+            BaconNumbers.not({ Actor: NextActor })
+        })
+
+        BaconNumberQuery.viewExt().reduce((acc: { [key: string]: number }, { kind, datum }) => {
+            const currentBaconNumber = acc[datum.NextActor]
+            if (kind === datalog.Added && (!currentBaconNumber || currentBaconNumber > datum.BaconNumber + 1)) {
+                return { ...acc, [datum.NextActor]: datum.BaconNumber + 1 }
+            } else if (kind === datalog.Removed && acc[datum.NextActor] === datum.BaconNumber + 1) {
+                const next = { ...acc }
+                delete next[datum.NextActor]
+                return next
+            }
+            return acc
+        }, {}).mapEffect((recentDatum) => {
+            if (recentDatum.kind === datalog.Added) {
+                Object.keys(recentDatum.datum).forEach(Actor => {
+                    BaconNumbers.assert({ Actor, number: recentDatum.datum[Actor] })
+                })
+                BaconNumberQuery.runQuery()
+            } else if (recentDatum.kind === datalog.Modified) {
+                Object.keys(recentDatum.oldDatum).forEach(Actor => {
+                    BaconNumbers.retract({ Actor, number: recentDatum.oldDatum[Actor] })
+                })
+                Object.keys(recentDatum.datum).forEach(Actor => {
+                    BaconNumbers.assert({ Actor, number: recentDatum.datum[Actor] })
+                })
+                BaconNumberQuery.runQuery()
+            }
+        })
+        expect(BaconNumbers.view().readAllData()).toEqual([
+            { Actor: "A", number: 3 },
+            { Actor: "B", number: 2 },
+            { Actor: "C", number: 1 },
+            { Actor: "Edward Asner", number: 1 },
+            { Actor: "Elvis Presley", number: 2 },
+            { Actor: "Kevin Bacon", number: 0 },
+        ])
+    })
+
     describe("Usage", () => {
         const People = datalog.newTable<{ id: number, name: string }>({
             id: datalog.NumberType,
@@ -1183,6 +1261,5 @@ describe("Into Table", () => {
                 Parents({ parent, child })
             }).view().readAllData().map(({ parent }) => parent)
         ).toEqual(["Alice"])
-
     })
 })

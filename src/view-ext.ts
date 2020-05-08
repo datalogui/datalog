@@ -350,7 +350,11 @@ export class Impl<T> implements ViewExt<T> {
   reduce<Acc>(reducer: (accumulator: Acc, recentVal: datalog.RecentDatum<T>) => Acc, initalVal: Acc): ViewExt<Acc> {
     let acc = new SingleItemView(initalVal)
     const onChange = (r: RecentDatum<T>) => {
-      acc._setValue(reducer(acc.currentVal, r))
+      const lastAcc = acc.currentVal
+      const nextVal = reducer(acc.currentVal, r)
+      if (lastAcc !== nextVal) {
+        acc._setValue(nextVal)
+      }
     }
     this.innerView.onChange(() => {
       this.innerView.recentData()?.map(onChange)

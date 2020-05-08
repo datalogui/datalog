@@ -24,6 +24,28 @@ describe("Map", () => {
       { n: 2 },
     ])
   })
+
+  test("dedups in map", () => {
+    const table = datalog.intoTable([
+      { a: 0, b: 1 },
+      { a: 1, b: 1 },
+      { a: 1, b: 2 },
+    ])
+    const view = table.view()
+    const viewExt = new ViewExt.Impl(view)
+    const mappedView = viewExt.map(({ a }) => ({ a }))
+    while (mappedView.recentData()) { }
+    expect(mappedView.readAllData()).toEqual([
+      { a: 0 },
+      { a: 1 },
+    ])
+
+    table.retract({ a: 1, b: 2 })
+    expect(mappedView.readAllData()).toEqual([
+      { a: 0 },
+      { a: 1 },
+    ])
+  })
 })
 
 describe("Reduce", () => {

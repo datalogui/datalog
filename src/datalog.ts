@@ -1,3 +1,5 @@
+import { ViewExt, Impl as ViewExtImpl } from "./view-ext";
+
 export const Unconstrained = Symbol('Unconstrained')
 
 type ValueOf<T> = T[keyof T];
@@ -7,8 +9,6 @@ type TupleizedUnconstrained<T> = Array<ValueOf<T> | typeof Unconstrained>
 
 type DEBUG_LEVEL_ENUM = 0 | 1 | 2
 const DEBUG_LEVEL = 0
-
-
 
 /**
  *  Finds the first index for which predicate is false. Returns an index of
@@ -222,6 +222,7 @@ export class ExtendWithUnconstrained<P, KName extends string | number | symbol, 
     intersect(prefix: P, vals: Array<TupleizedUnconstrained<Val>>): Array<TupleizedUnconstrained<Val>> {
         const keyLen = this.keyFunc(prefix).length
         if (DEBUG_LEVEL > 1 && this.isAnti) {
+            console.log("INTERSECTION", this)
             console.log("key is", prefix, this.keyFunc(prefix))
             console.log("output key is", this.outputKeys)
             console.log("Vals is", vals)
@@ -233,7 +234,7 @@ export class ExtendWithUnconstrained<P, KName extends string | number | symbol, 
         const out: Array<TupleizedUnconstrained<Val>> = []
 
         let valIndex = 0
-        while (valIndex < vals.length && startIdx < this.relation.elements.length) {
+        while (valIndex < vals.length && startIdx < this.endIdx) {
             const val = vals[valIndex]
 
             // @ts-ignore
@@ -242,6 +243,12 @@ export class ExtendWithUnconstrained<P, KName extends string | number | symbol, 
 
             // No more results for this val
             if (ordResult > 0) {
+                // If there are any unconstrained in our tuple, we have to reset
+                // the start idx. I'm not sure if there's a way around this.
+                // TODO
+                if (output.some((item: any) => item === Unconstrained)) {
+                    startIdx = this.startIdx
+                }
                 if (this.isAnti) {
                     out.push(val)
                 }
@@ -251,6 +258,19 @@ export class ExtendWithUnconstrained<P, KName extends string | number | symbol, 
             }
 
             const hasMatch = ordResult === 0
+            if (hasMatch && this.isAnti) {
+                valIndex++
+
+                // If there are any unconstrained in our tuple, we have to reset
+                // the start idx. I'm not sure if there's a way around this.
+                // TODO
+                if (output.some((item: any) => item === Unconstrained)) {
+                    startIdx = this.startIdx
+                }
+
+                continue
+            }
+
             if (!hasMatch) {
                 startIdx = gallop(this.relation.elements, (tuple: any) => {
                     const output = this._reshape(tuple, keyLen)
@@ -339,7 +359,7 @@ export function leapJoinHelper<KName extends string | number | symbol, KVal, Sou
     // Special case: only anti-leapers
     if (leapers.every(l => l.isAnti)) {
         source.elements.forEach(row => {
-            // Does any leaper reject this row?
+            // Do any leaper reject this row?
             if (leapers.some(l => l.count(row, true) === 0)) {
                 return
             }
@@ -489,13 +509,21 @@ export class RelationIndex<KName extends string | number | symbol, K, Val> {
         const insertIdx = gallop(this.elements, (row: any) => sortTuple(row, newRow) === -1)
         // Check if this is a retraction and if we have a matching datum to retract.
         // If so, we will remove the positive match and clear the slate.
+        const nextDatum = this.elements[insertIdx]
         if (isRetraction) {
-            const nextDatum = this.elements[insertIdx]
             if (nextDatum && !hasRetractionMeta(nextDatum) && sortTuple(nextDatum, newRow) === 0) {
                 // We have a match, remove nextDatum from our elements
                 this.elements.splice(insertIdx, 1)
                 return
             }
+        } else {
+            // Check the opposite too. We added a retraction, and now we add an assertion
+            if (nextDatum && hasRetractionMeta(nextDatum) && sortTuple(nextDatum, newRow) === 0) {
+                // We have a match, remove nextDatum from our elements
+                this.elements.splice(insertIdx, 1)
+                return
+            }
+
         }
         this.elements.splice(insertIdx, 0, newRow)
     }
@@ -664,6 +692,7 @@ export class Relation<T> implements MultiIndexRelation<T>, Tell<T>, Retract<T> {
 export const Added = Symbol("DatumAdded")
 export const Removed = Symbol("DatumRemoved")
 export const Modified = Symbol("DatumModified")
+type DiffKind = typeof Added | typeof Removed | typeof Modified
 
 export type RecentDatum<T> = {
     kind: typeof Added | typeof Removed
@@ -694,9 +723,11 @@ export class Variable<T> implements Tell<T>, Retract<T> {
     toString(): string {
         return `
 Variable ${this.name}:
+    Counts: ${JSON.stringify([...this.counts])}
     Stable: ${this.stable.toString()}
     Recent: ${this.recent.toString()}
     ToAdd: ${this.toAdd.map(r => r.toString())}
+
 `
     }
 
@@ -705,6 +736,7 @@ Variable ${this.name}:
         cloned.stable = this.stable.clone()
         cloned.recent = this.recent.clone()
         cloned.toAdd = this.toAdd.map(toAdd => toAdd.clone())
+        cloned.counts = new Map([...this.counts])
         return cloned
     }
 
@@ -752,11 +784,15 @@ Variable ${this.name}:
         if (!this.stable.relations[0]) {
             return []
         }
-        this.lastReadAllData = this.stable.relations[0].elements.map(row => {
-            // @ts-ignore
-            const datum = fromEntries(row.map((v, i) => [this.stable.relations[0].keyOrdering[i], v]))
-            return datum
-        })
+        this.lastReadAllData = this.stable.relations[0].elements
+            .filter(el => {
+                return !hasRetractionMeta(el)
+            })
+            .map(row => {
+                // @ts-ignore
+                const datum = fromEntries(row.map((v, i) => [this.stable.relations[0].keyOrdering[i], v]))
+                return datum
+            })
         return this.lastReadAllData
     }
 
@@ -773,26 +809,42 @@ Variable ${this.name}:
         if (this.toAdd.length === 0) {
             this.toAdd.push(new Relation<T>())
         }
-        this.toAdd[0].assert(v)
-        this._subscribers.forEach(s => s(v, false))
-        this.updateCount(v, true)
+        const nextCount = this.updateCount(v, true)
+        if (nextCount === 1) {
+            this.toAdd[0].assert(v)
+            this._subscribers.forEach(s => s(v, false))
+        }
     }
 
     retract(v: T) {
         if (this.toAdd.length === 0) {
             this.toAdd.push(new Relation<T>())
         }
-        this.toAdd[0].retract(v)
-        this._subscribers.forEach(s => s(v, true))
-        this.updateCount(v, false)
+        const nextCount = this.updateCount(v, false)
+        if (nextCount === 0) {
+            this.toAdd[0].retract(v)
+            this._subscribers.forEach(s => s(v, true))
+        }
     }
 
-    updateCount(v: T, increment: boolean) {
+    /**
+     * Returns next count
+     */
+    updateCount(v: T, increment: boolean): number {
         // Sort the keys
         const sortedEntries = Object.entries(v).sort(([k1], [k2]) => k1 === k2 ? 0 : k1 < k2 ? -1 : 1)
         const sortedEntriesKey = JSON.stringify(sortedEntries)
         const existingCount = this.counts.get(sortedEntriesKey) ?? 0
-        this.counts.set(sortedEntriesKey, existingCount + (increment ? 1 : -1))
+        const nextCount = existingCount + (increment ? 1 : -1)
+        this.counts.set(sortedEntriesKey, nextCount)
+        return nextCount
+    }
+
+    getCount(v: T) {
+        // Sort the keys
+        const sortedEntries = Object.entries(v).sort(([k1], [k2]) => k1 === k2 ? 0 : k1 < k2 ? -1 : 1)
+        const sortedEntriesKey = JSON.stringify(sortedEntries)
+        return this.counts.get(sortedEntriesKey) ?? 0
     }
 
     onAssert(f: (v: T, isRetraction: boolean) => void) {
@@ -984,6 +1036,10 @@ export function innerVariableJoinHelper(logicFn: (source: any, isRetraction: boo
         return indexByKeyOrder
     })
 
+    if (DEBUG_LEVEL > 0) {
+        console.log("Output key order is", outputKeyOrder)
+    }
+
     const restKeyOrderSets = restKeyOrders.map(keyOrder => new Set(keyOrder))
     const restkeyLengths = restKeyOrderSets.map(keyOrderSet => srckeyOrder.filter(k => keyOrderSet.has(k)).length)
 
@@ -1019,6 +1075,11 @@ export function innerVariableJoinHelper(logicFn: (source: any, isRetraction: boo
                     indexedRelation = indexedRelation.filterElements(constants[index])
                 }
 
+                if (DEBUG_LEVEL > 0) {
+                    console.log("Relation is:", relation.toString())
+                    console.log("Relation's key order is:", relationKeyOrder)
+                    console.log("KeyLength is ", keyLength)
+                }
                 // @ts-ignore
                 return new ExtendWithUnconstrained(
                     (src: any) => {
@@ -1034,6 +1095,11 @@ export function innerVariableJoinHelper(logicFn: (source: any, isRetraction: boo
                     relationKeyOrder,
                     variables[index].meta.isAnti
                 )
+            }
+
+            if (DEBUG_LEVEL > 0) {
+                console.log("Src Key Order is:", srckeyOrder)
+                console.log("Remap Key meta", srckeyOrder)
             }
             let indexedRelation = relation.indexBy(reverseRemapKeys(srckeyOrder, remapKeyMetas[index]))
             // Filter the relation with known constants. Could make joins faster
@@ -1113,13 +1179,14 @@ export interface MaterializedTable<T extends {}> extends Queryable<T>, AntiQuery
     /**
     * Add implications to the query. This allows for recursion. The results of a query can feed back to the inputs of the query.
     */
-    implies: (f: (datum: T) => void) => MaterializedTable<T>
+    implies: (f: (datum: T, kind: typeof Added | typeof Removed) => void) => MaterializedTable<T>
     toString: () => string
     /**
      * Subscribe to when a dependency of this MaterializedTable has change.
      * Useful if you want to know when you should rerurn the query
      */
     onDependencyChange: (subscriber: () => void) => UnsubscribeFn
+    viewExt: () => ViewExt<T>
     // queryVariables: null | Array<Variable<any>>
 }
 
@@ -1129,7 +1196,8 @@ function newMaterializedTable<T>(v: Variable<T>, runQuery: () => void, onDepende
     const innerTable = _newTable(v, true)
     const materializedTable = innerTable as unknown as MaterializedTable<T> & PrivateMaterializeTableState
     materializedTable.runQuery = runQuery
-    materializedTable.implies = (f: (datum: T) => void) => {
+
+    materializedTable.implies = (f: (datum: T, kind: typeof Added | typeof Removed) => void) => {
         const implicationView = materializedTable.view()
         const implicationContext = new QueryContext()
         // const scheduledRunQuery = false
@@ -1137,10 +1205,12 @@ function newMaterializedTable<T>(v: Variable<T>, runQuery: () => void, onDepende
             queryContext = implicationContext
             if (kind === Added) {
                 queryContext.implicationState = { isRetraction: false }
-                f(datum)
-            } else {
+                f(datum, kind)
+            } else if (kind === Removed) {
                 queryContext.implicationState = { isRetraction: true }
-                f(datum)
+                f(datum, kind)
+            } else {
+                throw new Error("Unhandle modification ??")
             }
             queryContext = emptyQueryContext
 
@@ -1292,8 +1362,22 @@ export function _newTable<T extends {}>(existingVar?: Variable<T>, isDerived?: b
     table._innerVar = variable
 
     if (!isDerived) {
-        table.assert = (args: T) => variable.assert(args)
-        table.retract = (args: T) => variable.retract(args)
+        table.assert = (args: T) => {
+            // Trick where we reverse the semantics if we are in a retraction
+            if (queryContext.implicationState?.isRetraction) {
+                variable.retract(args)
+            } else {
+                variable.assert(args)
+            }
+        }
+        table.retract = (args: T) => {
+            // // Same trick as above
+            if (queryContext.implicationState?.isRetraction) {
+                variable.assert(args)
+            } else {
+                variable.retract(args)
+            }
+        }
     }
 
     // table.clone = () => variable.clone()
@@ -1307,8 +1391,13 @@ export function _newTable<T extends {}>(existingVar?: Variable<T>, isDerived?: b
         return cloned
     }
 
+    table.viewExt = (): ViewExt<T> => {
+        return new ViewExtImpl<T>(table.view())
+    }
+
     // queryableVariable.changed = variable.changed
 
+    table.toString = () => variable.toString()
     return table
 }
 
@@ -1336,7 +1425,18 @@ export function query<Out>(queryFn: QueryFn<Out>): MaterializedTable<Out> {
     // Clone the variables so each query has it's own notions of stable/recent
     let queryVariables = savedQueryContext.variables.map((v: Variable<any>, i: number) => {
         const cloned = v.cloneAndTrack()
-        cloned.meta.isAnti = savedQueryContext.antiVariablesIndices.has(i)
+        const isAnti = savedQueryContext.antiVariablesIndices.has(i)
+
+        if (isAnti) {
+            cloned.meta.isAnti = true
+            cloned.onAssert(() => {
+                // Move everything to the stable relation
+                while (cloned.changed()) { }
+            })
+            // Move everything to the stable relation
+            while (cloned.changed()) { }
+        }
+
         return cloned
     })
 
