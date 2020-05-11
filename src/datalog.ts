@@ -43,6 +43,10 @@ export function gallop<T>(array: Array<T>, predFn: (tuple: T) => boolean, startI
     return startIdx + 1;
 }
 
+function debugPrintElements(elements) {
+    return `\n${elements.map((el: any) => (hasRetractionMeta(el) ? "RETRACTION" : "") + JSON.stringify(el.map((v: any) => v === Unconstrained ? "¿¿" : v))).join("\n").toString()}`
+}
+
 // Mutates the input array!
 // See https://doc.rust-lang.org/1.40.0/src/core/slice/mod.rs.html#1891 for a
 // great explanation of this algorithm.
@@ -129,6 +133,8 @@ export class ExtendWithUnconstrained<P, KName extends string | number | symbol, 
 
     startIdx: number = 0
     endIdx: number = 0
+    // DEBUG only!
+    __cachedKeyLen = 0
 
     constructor(keyFunc: (P: P) => Array<any>, keyLength: number, outputKeys: OutputKeys, relation: RelationIndex<KName, K, Val>, relationKeyOrder: any, isAnti: boolean = false) {
         this.keyFunc = keyFunc
@@ -152,6 +158,14 @@ export class ExtendWithUnconstrained<P, KName extends string | number | symbol, 
         }
     }
 
+    toString() {
+        return `
+${JSON.stringify(this.relation.keyOrdering)}
+${JSON.stringify(this.outputKeys)}
+isAnti:${this.isAnti}:\n${debugPrintElements(this.relation.elements.map(el => this._reshape(el as any, this.__cachedKeyLen)))}
+`
+    }
+
     /**
      *
      * @param prefix
@@ -159,6 +173,7 @@ export class ExtendWithUnconstrained<P, KName extends string | number | symbol, 
      */
     count(prefix: P, isAntiFilterOnly?: boolean): number {
         const key = this.keyFunc(prefix)
+        this.__cachedKeyLen = key.length
         if (this.relation.elements.length === 0) {
             return 0
         }
@@ -219,6 +234,7 @@ export class ExtendWithUnconstrained<P, KName extends string | number | symbol, 
     }
 
     // Could be faster if we mutate vals
+    // TODO rewrite this. It's gotten very messy
     intersect(prefix: P, vals: Array<TupleizedUnconstrained<Val>>): Array<TupleizedUnconstrained<Val>> {
         const keyLen = this.keyFunc(prefix).length
         if (DEBUG_LEVEL > 1 && this.isAnti) {
@@ -284,7 +300,7 @@ export class ExtendWithUnconstrained<P, KName extends string | number | symbol, 
             startIdx++
 
             // @ts-ignore
-            if (DEBUG_LEVEL > 0) {
+            if (DEBUG_LEVEL > 1) {
                 console.log("Comparing my output:", output, "val", val, this.relation, hasMatch)
             }
 
@@ -306,10 +322,19 @@ export class ExtendWithUnconstrained<P, KName extends string | number | symbol, 
                         setRetractionMeta(filledInUnconstrained, true)
                     }
                     out.push(filledInUnconstrained)
+
+                    // If there are any unconstrained in our tuple, we have to reset
+                    // the start idx. I'm not sure if there's a way around this.
+                    // TODO
+                    if (startIdx === this.endIdx && output.some((item: any) => item === Unconstrained)) {
+                        valIndex++
+                        startIdx = this.startIdx
+                    }
                     continue
                 }
                 out.push(val)
             }
+
             valIndex++
         }
 
@@ -400,7 +425,7 @@ export function leapJoinHelper<KName extends string | number | symbol, KVal, Sou
         // 2. Have the least-proposing leaper propose their values.
         if (minCount > 0) {
             let vals = leapers[minIndex].propose(row)
-            if (DEBUG_LEVEL > 0) {
+            if (DEBUG_LEVEL > 1) {
                 console.log("Leaper", leapers[minIndex], "proposed", vals)
             }
             // 3. Have the other leapers restrict the proposals.
@@ -409,11 +434,31 @@ export function leapJoinHelper<KName extends string | number | symbol, KVal, Sou
                 if (index !== minIndex) {
                     const leaper = leapers[index];
                     vals = leaper.intersect(row, vals)
-                    if (DEBUG_LEVEL > 0) {
-                        console.log("Leaper ", leapers[index], "intesersected", vals)
-                        // @ts-ignore
-                        console.log("Leaper it's elements were", leapers[index].relation.elements)
+                }
+            }
+
+            if (DEBUG_LEVEL > 0) {
+                console.log("Joining Src:\n" + source.toString())
+                let i = 0
+                for (const leaper of leapers) {
+                    console.log(`  Leaper[${i++}]${leapers[minIndex] === leaper ? "*" : ""} = ${leaper.toString()}`)
+                }
+
+                console.log("Src row is:", hasRetractionMeta(row) ? "RETRACTION:" : "", row)
+                let proposals = leapers[minIndex].propose(row)
+                console.log(`Leaper[${minIndex}] proposes: ${debugPrintElements(leapers[minIndex].propose(row))}`)
+                i = 0
+                for (const leaper of leapers) {
+                    if (i !== minIndex) {
+                        proposals = leaper.intersect(row, proposals)
+                        console.log(`  Leaper[${i}] intersection result: ${debugPrintElements(proposals)}`)
                     }
+                    i++
+                }
+                if (vals.length === 0) {
+                    console.log(`With no join`)
+                } else {
+                    console.log(`With join results of: ${debugPrintElements(vals)}`)
                 }
             }
 
@@ -448,6 +493,10 @@ export class RelationIndex<KName extends string | number | symbol, K, Val> {
     constructor(elements: Array<[K, ...Array<ValueOf<Val>>]>, keyOrdering: [KName, ...Array<keyof Val>]) {
         this.elements = elements
         this.keyOrdering = keyOrdering
+    }
+
+    toString() {
+        return this.elements.map(el => `${hasRetractionMeta(el) ? "RETRACTION:" : ""}${JSON.stringify(el)}`).join("\n")
     }
 
     clone(): RelationIndex<KName, K, Val> {
@@ -865,6 +914,9 @@ Variable ${this.name}:
         const subscribeFn = (datum: T, isRetraction: boolean) => {
             f()
         }
+        if (!this.recent.length) {
+            f()
+        }
         this.onAssert(subscribeFn);
         return () => { this.removeOnAssert(subscribeFn) }
     }
@@ -1066,7 +1118,7 @@ export function innerVariableJoinHelper(logicFn: (source: any, isRetraction: boo
             continue
         }
         if (DEBUG_LEVEL > 0) {
-            console.log("Comparing:\n" + variables.map((v, i) => (currentIteration >> i) & 1 ? `${i}: Stable. ${JSON.stringify(v.stable.relations[0])}` : `${i}: Recent. ${JSON.stringify(v.recent.relations[0])}`).join("\n"))
+            console.log("Comparing:\n" + variables.map((v, i) => (currentIteration >> i) & 1 ? `${i}: Stable. ${v.stable.toString()}` : `${i}: Recent. ${v.recent.toString()}`).join("\n"))
         }
         const indexedRelations = variables.map((variable, index) => {
             // check if we should return a recent or stable for this relation
@@ -1081,11 +1133,6 @@ export function innerVariableJoinHelper(logicFn: (source: any, isRetraction: boo
                     indexedRelation = indexedRelation.filterElements(constants[index])
                 }
 
-                if (DEBUG_LEVEL > 0) {
-                    console.log("Relation is:", relation.toString())
-                    console.log("Relation's key order is:", relationKeyOrder)
-                    console.log("KeyLength is ", keyLength)
-                }
                 // @ts-ignore
                 return new ExtendWithUnconstrained(
                     (src: any) => {
@@ -1103,10 +1150,10 @@ export function innerVariableJoinHelper(logicFn: (source: any, isRetraction: boo
                 )
             }
 
-            if (DEBUG_LEVEL > 0) {
-                console.log("Src Key Order is:", srckeyOrder)
-                console.log("Remap Key meta", srckeyOrder)
-            }
+            // if (DEBUG_LEVEL > 0) {
+            //     console.log("Src Key Order is:", srckeyOrder)
+            //     console.log("Remap Key meta", srckeyOrder)
+            // }
             let indexedRelation = relation.indexBy(reverseRemapKeys(srckeyOrder, remapKeyMetas[index]))
             // Filter the relation with known constants. Could make joins faster
             if (constants[index] !== undefined && constants[index] !== EmptyObj) {

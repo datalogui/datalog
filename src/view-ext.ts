@@ -11,7 +11,7 @@ export type Indexed<T> = { index: number, datum: T }
 
 export interface ViewExt<T> extends datalog.View<T> {
   map<O>(f: (t: T) => O): ViewExt<O>;
-  mapEffect<F extends EffectFn<T>>(f: F): void;
+  mapEffect<F extends EffectFn<T>>(f: F): SingleItemView<{}>;
 
   reduce<Acc>(reducer: (accumulator: Acc, recentVal: datalog.RecentDatum<T>) => Acc, initialVal: Acc): ViewExt<Acc>
 
@@ -72,6 +72,9 @@ export class SingleItemView<T> implements datalog.View<T> {
 
   onChange(subscriber: () => void): () => void {
     this.subscribers.push(subscriber)
+    if (this.modifiedSinceLastPolled) {
+      subscriber()
+    }
     return () => this.subscribers = this.subscribers.filter(s => s !== subscriber)
   }
 
@@ -332,19 +335,23 @@ export class Impl<T> implements ViewExt<T> {
     this.innerView.onChange(() => {
       this.innerView.recentData()?.map(onChange)
     })
-    this.innerView.recentData()?.map(onChange)
+    // this.innerView.recentData()?.map(onChange)
 
     return new Impl(out.view())
   }
 
-  mapEffect<F extends EffectFn<T>>(f: F) {
+  mapEffect<F extends EffectFn<T>>(f: F): SingleItemView<{}> {
+    const out = new SingleItemView({})
     const onChange = (r: RecentDatum<T>) => {
       f(r)
     }
     this.innerView.onChange(() => {
       this.innerView.recentData()?.map(onChange)
+      out._setValue({})
     })
-    this.innerView.recentData()?.map(onChange)
+    // this.innerView.recentData()?.map(onChange)
+    out._setValue({})
+    return out
   }
 
   reduce<Acc>(reducer: (accumulator: Acc, recentVal: datalog.RecentDatum<T>) => Acc, initalVal: Acc): ViewExt<Acc> {
@@ -359,7 +366,7 @@ export class Impl<T> implements ViewExt<T> {
     this.innerView.onChange(() => {
       this.innerView.recentData()?.map(onChange)
     })
-    this.innerView.recentData()?.map(onChange)
+    // this.innerView.recentData()?.map(onChange)
     return new Impl(acc)
   }
 
@@ -441,7 +448,7 @@ export class IndexedImpl<T> implements IndexedViewExt<T> {
     return new IndexedImpl(new MappedIndexedView(this.innerView, f))
   }
 
-  mapEffect<F extends EffectFn<Indexed<T>>>(f: F): void {
+  mapEffect<F extends EffectFn<Indexed<T>>>(f: F): SingleItemView<{}> {
     return this.innerView.mapEffect(f)
   }
 
