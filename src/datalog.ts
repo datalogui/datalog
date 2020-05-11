@@ -43,7 +43,7 @@ export function gallop<T>(array: Array<T>, predFn: (tuple: T) => boolean, startI
     return startIdx + 1;
 }
 
-function debugPrintElements(elements) {
+function debugPrintElements(elements: any) {
     return `\n${elements.map((el: any) => (hasRetractionMeta(el) ? "RETRACTION" : "") + JSON.stringify(el.map((v: any) => v === Unconstrained ? "¿¿" : v))).join("\n").toString()}`
 }
 

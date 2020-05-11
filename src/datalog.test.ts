@@ -972,7 +972,7 @@ describe("Examples from docs", () => {
         expect(A.view().readAllData()).toEqual([])
     })
     test("Home page demo", () => {
-        console.time("Bacon Number")
+        // console.time("Bacon Number")
         const InMovie = datalog.intoTable([
             { MovieName: "Change of Habit", Actor: "Elvis Presley" },
             { MovieName: "Foo", Actor: "A" },
@@ -1043,8 +1043,8 @@ describe("Examples from docs", () => {
             })
         // BaconNumberQuery.runQuery()
 
-        console.timeEnd("Bacon Number")
-        console.log("Query:", BaconNumberQuery.view().readAllData())
+        // console.timeEnd("Bacon Number")
+        // console.log("Query:", BaconNumberQuery.view().readAllData())
         expect(BaconNumbers.view().readAllData()).toEqual([
             { Actor: "A", number: 3 },
             { Actor: "B", number: 2 },
