@@ -1223,6 +1223,7 @@ interface Viewable<T extends {}> {
 }
 
 export interface Table<T extends {}> extends Tell<T>, Retract<T>, Queryable<T>, AntiQueryable<T>, Viewable<T> {
+    update(lookupArgs: Partial<T>, mergeWith: Partial<T>): void
 }
 
 type UnsubscribeFn = () => void
@@ -1429,6 +1430,73 @@ export function _newTable<T extends {}>(existingVar?: Variable<T>, isDerived?: b
                 variable.assert(args)
             } else {
                 variable.retract(args)
+            }
+        }
+
+        // Sugar to find a value an retract/assert a new updated value
+        table.update = (lookupArgs: Partial<T>, mergeWith: Partial<T>) => {
+            // Move everything to stable relation
+            while (variable.changed()) { }
+
+            // Look for items in stable first:
+            const lookupKs = Object.keys(lookupArgs)
+            // Look for a relation that has a compatible index
+            const findCompatibleIndexedRelation = (relation: RelationIndex<any, any, any>) => {
+                return lookupKs.every((k, i) => {
+                    k === relation.keyOrdering[i]
+                })
+            }
+            // Look for a pre-existing index pattern
+            let indexedRelation = variable.stable.relations.find(findCompatibleIndexedRelation)
+
+            // No pre-existing index, so we'll just make one
+            if (indexedRelation === undefined) {
+                const index = variable.stable.relations[0]?.keyOrdering
+                if (index === undefined) {
+                    throw new Error("Tried to update a table with no data!")
+                }
+                const keySet = new Set(index) as Set<string>
+                lookupKs.forEach(k => keySet.delete(k))
+                const newKeyOrdering = lookupKs.concat([...keySet])
+                indexedRelation = variable.stable.indexBy(newKeyOrdering as any) as any
+                //  variable.stable.indexBy()
+            }
+
+            if (indexedRelation === undefined) {
+                throw new Error("Shouldn't happen")
+            }
+
+            const retractions = []
+            const assertions = []
+
+            const unconstrainedParts = new Array(indexedRelation.keyOrdering.length - lookupKs.length).fill(Unconstrained)
+            const lookupVals = lookupKs.map(k => lookupArgs[k as keyof T]).concat(unconstrainedParts)
+            const startIdx = gallop(indexedRelation.elements as any, element => {
+                return sortTuple(element, lookupVals) < -1
+            })
+            const endIdx = gallop(indexedRelation.elements as any, element => {
+                return sortTuple(element, lookupVals) === 0
+            }, startIdx)
+
+            if (startIdx === indexedRelation.elements.length || endIdx === startIdx) {
+                throw new Error("No data found to update!")
+            }
+
+            const keyOrdering = indexedRelation.keyOrdering
+            for (let i = startIdx; i < endIdx; i++) {
+                const element = indexedRelation.elements[i]
+                const asObj = element.reduce((acc, v, i) => {
+                    // @ts-ignore
+                    acc[keyOrdering[i]] = v
+                    return acc
+                }, {})
+                retractions.push(asObj)
+                assertions.push({ ...asObj, ...mergeWith })
+            }
+
+            for (let i = 0; i < retractions.length; i++) {
+                variable.retract(retractions[i] as T)
+                variable.assert(assertions[i] as T)
             }
         }
     }

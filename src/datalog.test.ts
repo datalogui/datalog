@@ -1091,7 +1091,6 @@ describe("Examples from docs", () => {
         test("Retract data", () => {
             People.retract({ id: 1, name: "Bob" })
         })
-
         test("Find everyone's name", () => {
             // Returns all the names of everyone in the People database
             const Query = datalog.query<{ name: string }>(({ name }) => {
@@ -1210,6 +1209,38 @@ describe("Examples from docs", () => {
             }])
         })
     })
+
+    describe("Usage", () => {
+        const People = datalog.newTable<{ id: number, name: string }>({
+            id: datalog.NumberType,
+            name: datalog.StringType,
+        })
+
+        test("Update Data", () => {
+            People.assert({ id: 0, name: "Alice" })
+            People.assert({ id: 1, name: "Bob" })
+            People.assert({ id: 2, name: "Eve" })
+            const Query = datalog.query(({ id, name }) => {
+                People({ id, name })
+            })
+
+
+            expect(Query.view().readAllData()).toEqual([
+                { name: 'Alice', id: 0 },
+                { id: 1, name: "Bob" },
+                { id: 2, name: "Eve" }
+            ])
+
+            People.update({ id: 0 }, { name: "Alice 2" })
+            Query.runQuery()
+            expect(Query.view().readAllData()).toEqual([
+                { name: 'Alice 2', id: 0 },
+                { id: 1, name: "Bob" },
+                { id: 2, name: "Eve" }
+            ])
+        })
+    })
+
 })
 
 describe("Implications", () => {
