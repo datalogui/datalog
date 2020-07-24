@@ -1211,12 +1211,12 @@ describe("Examples from docs", () => {
     })
 
     describe("Usage", () => {
-        const People = datalog.newTable<{ id: number, name: string }>({
-            id: datalog.NumberType,
-            name: datalog.StringType,
-        })
-
         test("Update Data", () => {
+            const People = datalog.newTable<{ id: number, name: string }>({
+                id: datalog.NumberType,
+                name: datalog.StringType,
+            })
+
             People.assert({ id: 0, name: "Alice" })
             People.assert({ id: 1, name: "Bob" })
             People.assert({ id: 2, name: "Eve" })
@@ -1234,6 +1234,39 @@ describe("Examples from docs", () => {
             People.update({ id: 0 }, { name: "Alice 2" })
             Query.runQuery()
             expect(Query.view().readAllData()).toEqual([
+                { name: 'Alice 2', id: 0 },
+                { id: 1, name: "Bob" },
+                { id: 2, name: "Eve" }
+            ])
+        })
+
+        test("Update Data and then query", () => {
+            const People = datalog.newTable<{ id: number, name: string }>({
+                id: datalog.NumberType,
+                name: datalog.StringType,
+            })
+
+            People.assert({ id: 0, name: "Alice" })
+            People.assert({ id: 1, name: "Bob" })
+            People.assert({ id: 2, name: "Eve" })
+            const Query = datalog.query(({ id, name }) => {
+                People({ id, name })
+            })
+
+
+            expect(Query.view().readAllData()).toEqual([
+                { name: 'Alice', id: 0 },
+                { id: 1, name: "Bob" },
+                { id: 2, name: "Eve" }
+            ])
+
+            People.update({ id: 0 }, { name: "Alice 2" })
+
+            const Query2 = datalog.query(({ id, name }) => {
+                People({ id, name })
+            })
+
+            expect(Query2.view().readAllData()).toEqual([
                 { name: 'Alice 2', id: 0 },
                 { id: 1, name: "Bob" },
                 { id: 2, name: "Eve" }

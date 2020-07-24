@@ -1435,8 +1435,9 @@ export function _newTable<T extends {}>(existingVar?: Variable<T>, isDerived?: b
 
         // Sugar to find a value an retract/assert a new updated value
         table.update = (lookupArgs: Partial<T>, mergeWith: Partial<T>) => {
+            const variableClone = variable.cloneAndTrack()
             // Move everything to stable relation
-            while (variable.changed()) { }
+            while (variableClone.changed()) { }
 
             // Look for items in stable first:
             const lookupKs = Object.keys(lookupArgs)
@@ -1447,19 +1448,18 @@ export function _newTable<T extends {}>(existingVar?: Variable<T>, isDerived?: b
                 })
             }
             // Look for a pre-existing index pattern
-            let indexedRelation = variable.stable.relations.find(findCompatibleIndexedRelation)
+            let indexedRelation = variableClone.stable.relations.find(findCompatibleIndexedRelation)
 
             // No pre-existing index, so we'll just make one
             if (indexedRelation === undefined) {
-                const index = variable.stable.relations[0]?.keyOrdering
+                const index = variableClone.stable.relations[0]?.keyOrdering
                 if (index === undefined) {
                     throw new Error("Tried to update a table with no data!")
                 }
                 const keySet = new Set(index) as Set<string>
                 lookupKs.forEach(k => keySet.delete(k))
                 const newKeyOrdering = lookupKs.concat([...keySet])
-                indexedRelation = variable.stable.indexBy(newKeyOrdering as any) as any
-                //  variable.stable.indexBy()
+                indexedRelation = variableClone.stable.indexBy(newKeyOrdering as any) as any
             }
 
             if (indexedRelation === undefined) {
