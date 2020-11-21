@@ -1,11 +1,12 @@
 {
   "name": "@datalogui/datalog",
-  "version": "0.0.9",
+  "version": "0.0.10",
   "license": "(MIT OR Apache-2.0)",
   "main": "dist/index.js",
   "types": "dist/index.d.ts",
   "files": [
     "dist/index.js",
+    "dist/index.d.ts",
     "dist/datalog.js",
     "dist/datalog.d.ts",
     "dist/view-ext.js",
