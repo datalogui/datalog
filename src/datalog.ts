@@ -1472,7 +1472,7 @@ export function _newTable<T extends {}>(existingVar?: Variable<T>, isDerived?: b
             const unconstrainedParts = new Array(indexedRelation.keyOrdering.length - lookupKs.length).fill(Unconstrained)
             const lookupVals = lookupKs.map(k => lookupArgs[k as keyof T]).concat(unconstrainedParts)
             const startIdx = gallop(indexedRelation.elements as any, element => {
-                return sortTuple(element, lookupVals) < -1
+                return sortTuple(element, lookupVals) === -1
             })
             const endIdx = gallop(indexedRelation.elements as any, element => {
                 return sortTuple(element, lookupVals) === 0

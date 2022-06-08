@@ -1240,6 +1240,42 @@ describe("Examples from docs", () => {
             ])
         })
 
+        test("Update Data with string id", () => {
+            const Todos = datalog.newTable<{ id: string, text: string }>({
+                id: datalog.StringType,
+                text: datalog.StringType,
+            })
+
+            // const randomId = () => Math.random().toString(36).substring(2, 15)
+            // Generated with randomId above, but hardcoded for testing
+            const idA = "gqsosf5i7zm"
+            const idB = "p7dpx04wmu8"
+            const idC = "2zxs51rq6ph"
+
+
+            Todos.assert({ id: idA, text: "Alice" })
+            Todos.assert({ id: idB, text: "Bob" })
+            Todos.assert({ id: idC, text: "Eve" })
+            const Query = datalog.query(({ id, text }) => {
+                Todos({ id, text })
+            })
+
+
+            expect(Query.view().readAllData()).toEqual([
+                { id: idC, text: "Eve" },
+                { id: idA, text: "Alice" },
+                { id: idB, text: "Bob" },
+            ])
+
+            Todos.update({ id: idA }, { text: "Alice 2" })
+            Query.runQuery()
+            expect(Query.view().readAllData()).toEqual([
+                { id: idC, text: "Eve" },
+                { text: 'Alice 2', id: idA },
+                { id: idB, text: "Bob" },
+            ])
+        })
+
         test("Update Data and then query", () => {
             const People = datalog.newTable<{ id: number, name: string }>({
                 id: datalog.NumberType,
